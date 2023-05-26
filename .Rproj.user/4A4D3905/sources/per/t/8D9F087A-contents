@@ -1,0 +1,217 @@
+---
+title: "data-wrangling"
+author: "Jamie McDevitt-Irwin"
+date: "1/5/2022"
+output: html_document
+---
+
+
+# Load Data
+```{r}
+library(tidyverse);library(ggpubr);library(janitor);library(vegan);library(plotrix);library(ggvegan)
+
+load("../data/final-dataframes-cover/cover.minor.diversity.2014_wide.Rdata") 
+load("../data/final-dataframes-cover/cover.minor.diversity.2014_long.Rdata") 
+load("../data/final-dataframes-cover/cover.minor.diversity.2014_data.Rdata") 
+load("../data/final-dataframes-cover/cover.compare.diversity.2016_wide.Rdata")
+load("../data/final-dataframes-cover/cover.compare.diversity.2016_long.Rdata") 
+load("../data/final-dataframes-cover/cover.compare.diversity.2016_data.Rdata") 
+load("../data/final-dataframes-cover/cover.diversity.ALL_wide.Rdata") 
+load("../data/final-dataframes-cover/cover.diversity.ALL_long.Rdata") 
+load("../data/final-dataframes-cover/cover.diversity.ALL_data.Rdata") 
+```
+
+
+# Specific DFs
+## Treatment
+```{r}
+##### Caged Vs Uncaged ######
+# Wide DFs
+cover.ALL.uncaged_wide <- cover.diversity.ALL_wide %>%
+  filter(Treatment == "Uncaged") %>% 
+  arrange(as.numeric(New.Tile.Number)) # error with new.tile.number.year
+
+
+cover.ALL.caged_wide <- cover.diversity.ALL_wide %>%
+  filter(Treatment == "Caged")%>% 
+  arrange(as.numeric(New.Tile.Number)) 
+
+
+# Data Only DFs
+cover.ALL.uncaged_data <- cover.ALL.uncaged_wide %>%
+  column_to_rownames(var ="New.Tile.Number.Year") %>% 
+  select(-c(New.Tile.Number:New.Site))
+
+cover.ALL.caged_data <- cover.ALL.caged_wide %>%
+  column_to_rownames(var ="New.Tile.Number.Year") %>% 
+  select(-c(New.Tile.Number:New.Site))
+
+
+
+
+
+##### Caged Vs Uncaged by Year ######
+# Wide DFs
+cover.minor.diversity.2014.uncaged_wide <- cover.minor.diversity.2014_wide %>%
+  filter(Treatment == "Uncaged") %>% 
+  arrange(as.numeric(New.Tile.Number)) 
+
+cover.minor.diversity.2014.caged_wide <- cover.minor.diversity.2014_wide %>%
+  filter(Treatment == "Caged") %>% 
+  arrange(as.numeric(New.Tile.Number)) 
+
+cover.compare.diversity.2016.uncaged_wide <- cover.compare.diversity.2016_wide %>%
+  filter(Treatment == "Uncaged") %>% 
+  arrange(as.numeric(New.Tile.Number)) 
+
+cover.compare.diversity.2016.caged_wide <- cover.compare.diversity.2016_wide %>%
+  filter(Treatment == "Caged") %>% 
+  arrange(as.numeric(New.Tile.Number)) 
+
+
+# Data Only DFs
+cover.minor.diversity.2014.uncaged_data <- cover.minor.diversity.2014.uncaged_wide %>%
+  column_to_rownames(var ="New.Tile.Number") %>% 
+  select(-c(File.Name:New.Site))
+
+cover.minor.diversity.2014.caged_data <- cover.minor.diversity.2014.caged_wide %>%
+  column_to_rownames(var ="New.Tile.Number") %>% 
+  select(-c(File.Name:New.Site))
+
+cover.compare.diversity.2016.uncaged_data <- cover.compare.diversity.2016.uncaged_wide %>%
+  column_to_rownames(var ="New.Tile.Number") %>% 
+  select(-c(Year:New.Site))
+
+cover.compare.diversity.2016.caged_data <- cover.compare.diversity.2016.caged_wide %>%
+  column_to_rownames(var ="New.Tile.Number") %>% 
+  select(-c(Year:New.Site))
+```
+Doublechecked all above: January 22, 2021
+
+
+
+
+
+## Time Series 
+For the betapart and TBI analysis, anything to do with looking at change at the individual tile level. So can only have tiles that were surveyed in both 2014 and 2016.
+```{r}
+##### Uncaged #####
+dim(cover.minor.diversity.2014.uncaged_wide) # 89 22
+dim(cover.compare.diversity.2016.uncaged_wide)
+
+# create vector of tile numbers in 2016 and 2014
+sub.2016 <- cover.compare.diversity.2016.uncaged_wide$New.Tile.Number
+sub.2014 <- cover.minor.diversity.2014.uncaged_wide$New.Tile.Number
+
+# Filter out tiles that are only in both
+cover.diversity.2014.uncaged.time_wide <- cover.minor.diversity.2014.uncaged_wide %>%
+filter(New.Tile.Number %in% sub.2016) %>% # only keep rows that are in 2016 as well
+  arrange(as.numeric(New.Tile.Number))
+dim(cover.diversity.2014.uncaged.time_wide) # 71 tiles
+
+cover.diversity.2016.uncaged.time_wide <- cover.compare.diversity.2016.uncaged_wide %>%
+filter(New.Tile.Number %in% sub.2014) %>% # only keep rows that are in 2014 as well
+  arrange(as.numeric(New.Tile.Number))
+dim(cover.diversity.2016.uncaged.time_wide) # 71 tiles
+
+
+# Add cover categories that are missing from each dataframe
+# Overall Uncaged 
+timeseries.cover.uncaged_wide <- plyr::rbind.fill(cover.diversity.2014.uncaged.time_wide, cover.diversity.2016.uncaged.time_wide) %>%
+  select(-File.Name) %>%
+  replace(is.na(.), 0) %>%
+    mutate(New.Tile.Number.Year = paste(New.Tile.Number, Year, sep= "_")) %>%
+  select(New.Tile.Number.Year, New.Tile.Number:MACA6) %>% # reorder
+  arrange(as.numeric(New.Tile.Number))
+  
+
+# Split into each year 
+timeseries.cover.uncaged.2014_wide <- timeseries.cover.uncaged_wide %>%
+  filter(Year == "2014") %>%
+  arrange(as.numeric(New.Tile.Number))
+
+timeseries.cover.uncaged.2016_wide <- timeseries.cover.uncaged_wide %>%
+  filter(Year == "2016") %>%
+  arrange(as.numeric(New.Tile.Number))
+
+
+# Data Only
+timeseries.cover.uncaged.2014_data <- timeseries.cover.uncaged.2014_wide %>%
+  column_to_rownames(var ="New.Tile.Number") %>%
+  select(-c(New.Tile.Number.Year:New.Site))
+dim(timeseries.cover.uncaged.2014_data) # 71 18
+  
+
+timeseries.cover.uncaged.2016_data <- timeseries.cover.uncaged.2016_wide %>%
+  column_to_rownames(var ="New.Tile.Number") %>%
+  select(-c(New.Tile.Number.Year:New.Site))
+dim(timeseries.cover.uncaged.2016_data) # 71 18
+
+
+
+
+
+##### Caged #####
+dim(cover.minor.diversity.2014.caged_wide) # 90 22
+dim(cover.compare.diversity.2016.caged_wide) # 67 24
+
+# create vector of tile numbers in 2016 and 2014
+sub.2016 <- cover.compare.diversity.2016.caged_wide$New.Tile.Number
+sub.2014 <- cover.minor.diversity.2014.caged_wide$New.Tile.Number
+
+# Filter out tiles that are only in both
+cover.diversity.2014.caged.time_wide <- cover.minor.diversity.2014.caged_wide %>%
+filter(New.Tile.Number %in% sub.2016) %>% # only keep rows that are in 2016 as well
+  arrange(as.numeric(New.Tile.Number))
+dim(cover.diversity.2014.caged.time_wide) # 67 tiles
+
+cover.diversity.2016.caged.time_wide <- cover.compare.diversity.2016.caged_wide %>%
+filter(New.Tile.Number %in% sub.2014) %>% # only keep rows that are in 2014 as well
+  arrange(as.numeric(New.Tile.Number))
+dim(cover.diversity.2016.caged.time_wide) # 67 tiles
+
+
+# Add cover categories that are missing from each dataframe
+# Overall Uncaged 
+timeseries.cover.caged_wide <- plyr::rbind.fill(cover.diversity.2014.caged.time_wide, cover.diversity.2016.caged.time_wide) %>%
+  select(-File.Name) %>%
+  replace(is.na(.), 0) %>%
+    mutate(New.Tile.Number.Year = paste(New.Tile.Number, Year, sep= "_")) %>%
+  select(New.Tile.Number.Year, New.Tile.Number:MACA6) %>% # reorder
+  arrange(as.numeric(New.Tile.Number))
+  
+
+# Split into each year 
+timeseries.cover.caged.2014_wide <- timeseries.cover.caged_wide %>%
+  filter(Year == "2014") %>%
+  arrange(as.numeric(New.Tile.Number))
+
+timeseries.cover.caged.2016_wide <- timeseries.cover.caged_wide %>%
+  filter(Year == "2016") %>%
+  arrange(as.numeric(New.Tile.Number))
+
+
+# Data Only
+timeseries.cover.caged.2014_data <- timeseries.cover.caged.2014_wide %>%
+  column_to_rownames(var ="New.Tile.Number") %>%
+  select(-c(New.Tile.Number.Year:New.Site))
+  
+
+timeseries.cover.caged.2016_data <- timeseries.cover.caged.2016_wide %>%
+  column_to_rownames(var ="New.Tile.Number") %>%
+  select(-c(New.Tile.Number.Year:New.Site))
+  
+
+
+
+##### Combine Caged and Uncaged ######
+dim(timeseries.cover.caged_wide)
+dim(timeseries.cover.uncaged_wide)
+
+times.series.ALL_wide <- plyr::rbind.fill(timeseries.cover.caged_wide, 
+                                          timeseries.cover.uncaged_wide)
+
+times.series.ALL_data <- times.series.ALL_wide %>%
+  column_to_rownames(var= "New.Tile.Number.Year") %>%
+  select(-c(New.Tile.Number:New.Site))
+```

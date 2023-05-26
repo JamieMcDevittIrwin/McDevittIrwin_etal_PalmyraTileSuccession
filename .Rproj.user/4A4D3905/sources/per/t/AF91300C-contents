@@ -1,0 +1,2356 @@
+---
+title: "Data Analysis"
+author: "Jamie McDevitt-Irwin"
+date: "11/17/2020"
+output: html_document
+---
+Dependency: data-wrangling.Rmd
+
+**Stats Notes**   
+https://cran.r-project.org/web/packages/emmeans/vignettes/comparisons.html#contrasts
+https://towardsdatascience.com/one-of-the-most-common-unintentional-mistakes-when-running-an-anova-in-r-cfa55d332a
+https://stats.stackexchange.com/questions/20002/regression-vs-anova-discrepancy-aov-vs-lm-in-r
+
+Model diagnostics of glm: https://bookdown.org/egarpor/PM-UC3M/glm-diagnostics.html#glm-diagnostics-2
+
+# Abundance
+```{r}
+
+# Abundance over time
+p_abundance_time <- cover.diversity.ALL_long %>%
+  group_by(Treatment, Year, Category) %>%
+  dplyr::summarize(mean= mean(Percent.Cover)) %>%
+ggplot(aes(as.numeric(Year), mean, col=Category)) + 
+  geom_point()+
+  geom_line(aes(col= Category)) +
+  theme_pubr() +
+  scale_x_continuous(breaks=c(2014, 2016), 
+                     labels= c("2014", "2016"),
+                     name= "Year")+
+    facet_wrap(. ~ Treatment) + 
+  labs(y= "Mean Percent Cover")
+
+p_abundance_time
+
+ggsave(file= "../figures/abundance-time.pdf",
+       plot= p_abundance_time,
+       height=8,
+       width=10)
+
+
+# Abundance over time: faceted by category (FIGURE 1)
+cols <- c("#29AF7FFF", "#440154FF") # define our colours
+
+# full names for facet labels
+facet_names <- c(
+                    `CCA.ALL` = "CCA",
+                    `Coral` = "Coral",
+                    `DICT` = "Dictyota",
+                    `GEA` = "Green encrusting algae",
+                    `LOB` = "Lobophora",
+                    `MACA` = "MACA",
+                    `MACA1` = "MACA1",
+                    `MACA3` = "MACA3",
+                    `MACA4` = "MACA4",
+                    `MACA5` = "MACA5",
+                    `MACA6` = "MACA6",
+                    `Non.Coral.Invertebrate` = "Non Coral Invertebrate",
+                    `PEY` = "Peyssonnelia",
+                    `Substrate` = "Substrate",
+                    `TURF` = "Turf",
+                    `Unknown` = "Unknown",
+                    `CYAN` = "Cyanobacteria",
+                    `MACA2` = "MACA2"
+                    )
+
+p_abund_time_facet <- cover.diversity.ALL_long %>%
+  group_by(Treatment, Year, Category) %>%
+  dplyr::summarize(mean= mean(Percent.Cover),
+                   sd = sd(Percent.Cover),
+                   se= sd(Percent.Cover)/sqrt(length(Percent.Cover))) %>%
+  mutate(Category= fct_reorder(Category, desc(mean))) %>%
+  ggplot(aes(as.numeric(Year), mean, col=Treatment, shape=Year)) + 
+  geom_pointrange(aes(ymin=mean-se, ymax= mean+se), size=1.1)+
+  geom_line(aes(group= Treatment)) +
+  facet_wrap( ~ Category, scales= "free", labeller=as_labeller(facet_names)) +
+  theme_pubr(base_size= 16) +
+  scale_x_continuous(breaks=c(2014, 2016), 
+                     labels= c("Year 1", "Year 3"),
+                     name= "Year")+
+  labs(y= "Percent Cover (+/- SE)")+ 
+  scale_colour_manual(values=cols) +
+  scale_shape_manual(values=c(16,17),
+                     breaks=c(2014, 2016), 
+                     labels=c("Year 1", "Year 3")) + 
+  theme(legend.position= "bottom")
+
+p_abund_time_facet
+
+ggsave(file= "../figures/abundance-time-facet.png",
+       plot= p_abund_time_facet,
+       height=8,
+       width=14)
+
+```
+
+
+
+
+# NMDS
+
+https://chrischizinski.github.io/rstats/vegan-ggplot2/ 
+https://jonlefcheck.net/2012/10/24/nmds-tutorial-in-r/
+
+ggordiplot: https://john-quensen.com/wp-content/uploads/2017/12/Ordiplots_with_ggplot.pdf 
+https://john-quensen.com/wp-content/uploads/2020/12/Modifying_Plots_Made_with_ggordiplots.html 
+
+https://stats.stackexchange.com/questions/458022/use-vegdist-function-before-metamds
+
+
+## 2014
+```{r}
+##### NMDS #####
+library(ggordiplots)
+set.seed(1)
+#bray.2014 <-vegdist(sqrt(cover.minor.diversity.2014_data), method='bray') # create bray dissimilarity
+bray.2014.MDS<-metaMDS(sqrt(cover.minor.diversity.2014_data), distance="bray", k=3) #  you dont have to call vegdist first, you coudl have NMDS do this for you 
+# results look barely different if you let NMDS do some transformations and give the community matrix instead of bray dissimilarities (just NMDS scale increases)
+# since bray is default you also dont need to say what the distance is (checked and it doesn't change anything)
+
+bray.2014.MDS # solution reached
+bray.2014.MDS$stress # 0.07899633
+stressplot(bray.2014.MDS) # Shepard plot 
+# scatter around the regression between the distances between each pair of communities against their original dissimilarities
+
+# Significant Species
+bray.2014.spp.fit <- envfit(bray.2014.MDS, sqrt(cover.minor.diversity.2014_data), permutations = 999) # this fits species vectors
+spp.scrs <- as.data.frame(scores(bray.2014.spp.fit, display = "vectors")) #save species intrinsic values into dataframe
+spp.scrs <- cbind(spp.scrs, Species = rownames(spp.scrs)) #add species names to dataframe
+spp.scrs <- cbind(spp.scrs, pval = bray.2014.spp.fit$vectors$pvals) #add pvalues to dataframe so you can select species which are significant
+#spp.scrs<- cbind(spp.scrs, abrev = abbreviate(spp.scrs$Species, minlength = 6)) #abbreviate species names
+sig.spp.scrs <- subset(spp.scrs, pval<=0.05) #subset data to show species significant at 0.05
+
+head(sig.spp.scrs)
+
+sig.spp.scrs$Species <- recode(sig.spp.scrs$Species,"CCA.ALL" = "CCA")
+
+##### Plot #####
+# check rownames of data and metadata
+rownames(cover.minor.diversity.2014_data)
+cover.minor.diversity.2014_wide$New.Tile.Number
+
+
+# use ordiplot package
+plot.2014 <- gg_ordiplot(bray.2014.MDS, 
+                    groups= cover.minor.diversity.2014_wide$Treatment, 
+                    hull=FALSE, ellipse=TRUE, spiders=FALSE,
+                    kind="sd", pt.size=4) 
+# this is where can add ellipse, spiders or hull 
+
+cols <- c("#29AF7FFF", "#440154FF") #define my color scheme
+
+# refine the plot (you can pull out "plot" from the gg_ordiplot call)
+p_NMDS_2014 <- plot.2014$plot + 
+  theme_bw()+ 
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        legend.position= "none") + 
+  ggtitle('a) Year 1') + 
+  labs(colour= "Treatment") +
+    annotate("text", x = -0.8, y = 1, label = "stress=0.08") +
+  theme_pubr(base_size = 16) + 
+  scale_colour_manual(values= alpha((cols), 0.7)) +
+  coord_fixed(xlim=c(-1, 1), ylim=c(-1, 1)) +
+  guides(color= "none")+
+  geom_segment(data = sig.spp.scrs, aes(x = 0, xend=NMDS1, y=0, yend=NMDS2), arrow = arrow(length = unit(0.25, "cm")), colour = "grey10", lwd=0.3)+ #add vector arrows of significant species
+  ggrepel::geom_text_repel(data = sig.spp.scrs, aes(x=NMDS1, y=NMDS2, label = Species), cex = 4, direction = "both", segment.size = 0.25) #add labels for species, use ggrepel::geom_text_repel so that labels do not overlap
+p_NMDS_2014
+
+ggsave(file= "../figures/NMDS-2014.pdf",
+       plot= p_NMDS_2014,
+       height=8,
+       width=10)
+```
+
+
+
+## 2016
+```{r}
+######## NMDS #######
+set.seed(2)
+#bray.2016 <-vegdist(sqrt(cover.compare.diversity.2016_data), method='bray')
+bray.2016.MDS<-metaMDS(sqrt(cover.compare.diversity.2016_data), distance="bray", k = 3, trymax= 50) # NMDS
+# trymax, maximum number of random starts in search of a stable solution (the default is 20 but this NMDS is having issues converging so we increased it)
+bray.2016.MDS # solution reached
+bray.2016.MDS$stress #  0.106366
+stressplot(bray.2016.MDS)
+
+
+# Significant Species
+bray.2016.spp.fit <- envfit(bray.2016.MDS, sqrt(cover.compare.diversity.2016_data), permutations = 999) # this fits species vectors
+spp.scrs <- as.data.frame(scores(bray.2016.spp.fit, display = "vectors")) #save species intrinsic values into dataframe
+spp.scrs <- cbind(spp.scrs, Species = rownames(spp.scrs)) #add species names to dataframe
+spp.scrs <- cbind(spp.scrs, pval = bray.2016.spp.fit$vectors$pvals) #add pvalues to dataframe so you can select species which are significant
+#spp.scrs<- cbind(spp.scrs, abrev = abbreviate(spp.scrs$Species, minlength = 6)) #abbreviate species names
+sig.spp.scrs <- subset(spp.scrs, pval<=0.05) #subset data to show species significant at 0.05
+
+head(sig.spp.scrs)
+
+sig.spp.scrs$Species <- recode(sig.spp.scrs$Species,"CCA.ALL" = "CCA")
+
+
+
+##### Plot #####
+# check rownames of data and metadata
+rownames(cover.compare.diversity.2016_data)
+cover.compare.diversity.2016_wide$New.Tile.Number
+
+plot.2016 <- gg_ordiplot(bray.2016.MDS, 
+                    groups= cover.compare.diversity.2016_wide$Treatment, 
+                    hull=FALSE, ellipse=TRUE, spiders=FALSE,
+                    kind="sd", pt.size=4) # this is where can add ellipse, spiders or hull
+plot.2016
+
+names(plot.2016)
+ord.data <- plot.2016$df_ord
+str(ord.data)
+
+cols <- c("#29AF7FFF", "#440154FF") # define my colour plot
+
+# To edit shape, need to pull out of gg_ordiplot (using different code than 2014)
+p_NMDS_2016 <- ggplot(data=ord.data, aes(x=x, y=y, color=Group)) + 
+  geom_point(size=4, shape= 17, alpha=0.7) + 
+  xlab("NMDS1") +
+  ylab("NMDS2") +
+  geom_path(data = plot.2016$df_ellipse, # calling ellipse from gg_ordiplot
+            aes(x = x, y = y, color = Group), 
+            show.legend = FALSE) +
+  theme_bw()+ 
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        legend.position= "none") + 
+  ggtitle('b) Year 3') + 
+  labs(colour= "Treatment") +
+      annotate("text", x = -0.8, y = 1, label = " stress=0.11") +
+  theme_pubr(base_size = 16)+ 
+    #scale_shape_manual(values= c(16, 17))+
+    scale_colour_manual(values= cols) +
+  coord_fixed(xlim=c(-1, 1), ylim=c(-1, 1)) +
+   guides(color= "none")+
+   geom_segment(data = sig.spp.scrs, aes(x = 0, xend=NMDS1, y=0, yend=NMDS2), arrow = arrow(length = unit(0.25, "cm")), colour = "grey10", lwd=0.3)+ #add vector arrows of significant species
+   ggrepel::geom_text_repel(data = sig.spp.scrs, aes(x=NMDS1, y=NMDS2, label = Species), cex = 4, direction = "both", segment.size = 0.25 ,colour="grey10") #add labels for species, use ggrepel::geom_text_repel so that labels do not overlap
+
+p_NMDS_2016
+
+
+ggsave(file= "../figures/NMDS-2016.pdf",
+       plot= p_NMDS_2016,
+       height=8,
+       width=10)
+
+
+# Combine 2014 and 2016
+p_NMDS_combined <- ggarrange(p_NMDS_2014, p_NMDS_2016,
+                             legend= NULL)
+p_NMDS_combined
+
+ggsave(file= "../figures/NMDS-combined.png",
+       plot= p_NMDS_combined,
+       height=7,
+       width=14)
+
+```
+
+
+
+
+Group centroid: https://stackoverflow.com/questions/47516448/how-to-get-ordispider-like-clusters-in-ggplot-with-nmds  
+
+## Centroids
+```{r}
+##### Combined 2014 and 2016 NMDS ######
+library(ggordiplots)
+set.seed(3)
+#bray.ALL <-vegdist(sqrt(cover.diversity.ALL_data), method='bray')
+bray.ALL.MDS <-vegan::metaMDS(sqrt(cover.diversity.ALL_data), distance="bray", k = 3) # NMDS
+bray.ALL.MDS
+bray.ALL.MDS$stress #  0.09848134
+
+
+
+
+
+
+
+##### Plot #####
+# check rownames of data and metadata
+rownames(cover.diversity.ALL_data)
+cover.diversity.ALL_wide$New.Tile.Number.Year
+
+
+# create a new variable of treatment and year
+df <- cover.diversity.ALL_wide %>%
+  mutate(Treatment.Year = paste(Treatment, Year, sep="."))
+
+# plot with gg_ordiplot to compare to our manual plot below
+plot <- gg_ordiplot(bray.ALL.MDS, groups= df$Treatment.Year, hull=FALSE, ellipse=FALSE, spiders=FALSE, label=TRUE) 
+plot
+
+p_trajectory <- plot$plot + 
+  theme_bw()+ 
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank()) + 
+  ggtitle('Combined, stress=0.10') 
+p_trajectory # looks very similar to plot below
+
+
+
+##### Plot with ggplot manually #####
+# Group Centroid Calculation
+scrs <- scores(bray.ALL.MDS, display = 'sites') # pull out scores of the sites
+scrs <- cbind(as.data.frame(scrs), Treatment.Year = df$Treatment.Year) # combine treatment.year with scrs
+cent <- aggregate(cbind(NMDS1, NMDS2) ~ Treatment.Year, data = scrs, FUN = mean) # centroid calc for each treatment
+
+# Plot
+cols3 <- c("#29AF7FFF","#29AF7FFF", "#440154FF","#440154FF") # define my colours
+
+p_all_centroids <- ggplot(scrs, aes(x = NMDS1, y = NMDS2, 
+                                    colour = Treatment.Year,
+                                    shape= Treatment.Year)) +
+  geom_point(size=4, alpha=0.7) + 
+    geom_point(data = cent, size = 11) +                         # centroids
+  scale_color_manual(values=cols3, 
+                     labels=c("Caged.Year1", "Caged.Year3", "Uncaged.Year1", "Uncaged.Year3" )) +
+    scale_shape_manual(values=c(16, 17, 16,17),labels=c("Caged.Year1", "Caged.Year3", "Uncaged.Year1", "Uncaged.Year3" ))+
+  geom_segment(x = cent[1,2], y = cent[1,3], # Caged Arrow
+                   xend = cent[2,2], yend = cent[2,3],
+                   colour="white",size=1.25,
+                  arrow = arrow(length = unit(0.5, "cm"))) +
+  geom_segment(x = cent[3,2], y = cent[3,3], # Uncaged Arrow
+                   xend = cent[4,2], yend = cent[4,3],
+                   colour="white", size=1.25,
+                  arrow = arrow(length = unit(0.5, "cm"))) +
+  coord_fixed()   + 
+  theme_bw() + 
+  theme_pubr(base_size = 16) +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        legend.position = "bottom") +
+  ggtitle(label="c) Combined")+
+      annotate("text", x = -0.8, y = 1, label = " stress=0.10") +
+  coord_fixed(xlim=c(-1, 1), ylim=c(-1, 1)) 
+p_all_centroids
+
+ggsave(file= "../figures/NMDS-centroids.png",
+       plot= p_all_centroids,
+       height=10,
+       width=12)
+
+
+
+# Combine All the NMDS Plots (FIGURE 2)
+p_NMDS_all <- ggarrange(ggarrange(p_NMDS_2014, p_NMDS_2016, ncol=2), p_all_centroids, 
+                        nrow=2, ncol=1, common.legend=TRUE,
+                        legend= "right")
+p_NMDS_all
+
+ggsave(file= "../figures/NMDS-all.png",
+       plot= p_NMDS_all,
+       height=10,
+       width=12)
+```
+
+
+
+
+
+#  Beta Dispersion
+https://www.rdocumentation.org/packages/vegan/versions/2.4-2/topics/betadisper
+
+
+*Bray-curtis*
+```{r}
+#### 2014 ####
+##############
+
+# Any taxa with zero abundance?
+colSums(cover.minor.diversity.2014_data) == 0 # no
+str(cover.minor.diversity.2014_wide)
+
+cover.minor.diversity.2014_wide$Treatment <- as.factor(cover.minor.diversity.2014_wide$Treatment)
+
+# Beta dispersion
+bray.2014 <- vegdist(sqrt(cover.minor.diversity.2014_data), method='bray')
+mod_2014 <- betadisper(bray.2014, cover.minor.diversity.2014_wide$Treatment)
+mod_2014
+plot(mod_2014)
+anova(mod_2014)
+permutest(mod_2014, permutations=9999)  
+# Response: Distances
+#            Df  Sum Sq  Mean Sq      F N.Perm Pr(>F)  
+# Groups      1 0.03574 0.035743 3.6544   9999 0.0538 .
+# Residuals 177 1.73120 0.009781                       
+# ---
+# Signif. codes:  
+# 0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+plot(mod_2014$dist)
+
+
+
+
+##### 2016 ######
+#################
+
+# Any taxa with zero abundance?
+colSums(cover.compare.diversity.2016_data) == 0 # no
+
+str(cover.compare.diversity.2016_wide)
+cover.compare.diversity.2016_wide$Treatment <- as.factor(cover.compare.diversity.2016_wide$Treatment)
+
+# Beta dispersion
+bray.2016 <- vegdist(sqrt(cover.compare.diversity.2016_data), method='bray')
+mod_2016 <- betadisper(bray.2016, cover.compare.diversity.2016_wide$Treatment)
+mod_2016
+anova(mod_2016)
+permutest(mod_2016, permutations=9999)
+# Response: Distances
+#            Df  Sum Sq  Mean Sq      F N.Perm Pr(>F)    
+# Groups      1 0.22436 0.224357 18.477   9999  1e-04 ***
+# Residuals 136 1.65139 0.012143 
+#TukeyHSD(mod_2016)
+plot(mod_2016)
+boxplot(mod_2016)
+```
+
+
+
+## Models
+```{r}
+###### 2014 ######
+##################
+# Extract the data
+distance <- as.data.frame(mod_2014$distances)
+group <- as.data.frame(mod_2014$group)
+betadisper_2014 <- cbind(distance, group) %>%
+  dplyr::rename(Distance_to_centroid = "mod_2014$distances",
+         Treatment = "mod_2014$group")
+
+# create metadata df
+betadisp.2014.meta <- cover.minor.diversity.2014_wide %>%
+  select(New.Tile.Number, Year, Treatment, Original.Tile.Number,New.Site, Depth, Pair)
+
+# check the order 
+betadisp.2014.meta$New.Tile.Number
+rownames(distance)
+# same order
+
+# combine all together
+betadisp.2014.meta$beta.dispersion = paste(mod_2014$distances)
+betadisp.2014.meta$beta.dispersion <- as.numeric(betadisp.2014.meta$beta.dispersion)
+summary(betadisp.2014.meta$beta.dispersion)
+hist(betadisp.2014.meta$beta.dispersion) # looks ok
+
+
+# change to factors
+betadisp.2014.meta$Treatment <- as.factor(betadisp.2014.meta$Treatment)
+betadisp.2014.meta$New.Site <- as.factor(betadisp.2014.meta$New.Site)
+betadisp.2014.meta$Depth <- as.factor(betadisp.2014.meta$Depth)
+betadisp.2014.meta$Pair <- as.factor(betadisp.2014.meta$Pair)
+
+
+
+# Linear Mixed Effects Model
+library(lme4)
+betadisp.2014.model1 <- lmer(beta.dispersion ~ Treatment + New.Site + Depth + (1 | Pair), data = betadisp.2014.meta) # singular
+summary(betadisp.2014.model1)
+car::Anova(betadisp.2014.model1, type=2)
+# Analysis of Deviance Table (Type II Wald chisquare tests)
+# 
+# Response: beta.dispersion
+#            Chisq Df Pr(>Chisq)   
+# Treatment 3.8023  1   0.051183 . 
+# New.Site  9.6604  2   0.007985 **
+# Depth     0.4375  2   0.803508   
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+
+# Try a few models to avoid singularity
+betadisp.2014.model2 <- lmer(beta.dispersion ~ Treatment + New.Site + (1 | Pair), data = betadisp.2014.meta) # singular
+
+betadisp.2014.model3 <- lmer(beta.dispersion ~ Treatment + Depth + (1 | Pair), data = betadisp.2014.meta) # singular
+
+betadisp.2014.model4 <- lmer(beta.dispersion ~ Treatment + (1 | Pair), data = betadisp.2014.meta) # singular
+
+
+
+# Simple Linear Model
+betadisp.2014.model5 <- lm(beta.dispersion ~ Treatment + New.Site + Depth, data = betadisp.2014.meta)
+summary(betadisp.2014.model5)
+car::Anova(betadisp.2014.model5, type=2)
+# Anova Table (Type II tests)
+# 
+# Response: beta.dispersion
+#            Sum Sq  Df F value   Pr(>F)   
+# Treatment 0.03595   1  3.8023 0.052799 . 
+# New.Site  0.09134   2  4.8302 0.009094 **
+# Depth     0.00414   2  0.2188 0.803730   
+# Residuals 1.63575 173                    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+# similar results to our original anova 
+
+plot(betadisp.2014.model5) # looks ok? 
+
+
+### Least Square Means ###
+library(emmeans)
+lsm.bdisp.2014.model1 <- emmeans(betadisp.2014.model5, "Treatment") 
+lsm.bdisp.2014.model1
+pairs(lsm.bdisp.2014.model1)
+#  contrast        estimate     SE  df t.ratio p.value
+#  Caged - Uncaged   0.0283 0.0145 173 1.950   0.0528 
+# 
+# Results are averaged over the levels of: New.Site, Depth 
+
+
+# LSM Plot
+lsm.bdisp.2014 <- as.data.frame(summary(lsm.bdisp.2014.model1))
+colnames(lsm.bdisp.2014)
+
+p_bdisp.2014.lsmeans <- ggplot(lsm.bdisp.2014, aes(x=Treatment, y=emmean, colour= Treatment)) +
+    geom_pointrange(aes(ymin= emmean-SE, ymax= emmean+SE), size=2) +
+  labs(y= "Beta dispersion",
+       x= "") +
+  theme_pubr(base_size = 16) + 
+  scale_colour_manual(values=c("#29AF7FFF", "#440154FF")) +
+  guides(color=FALSE) +
+  ggtitle("a) Year 1 .")
+p_bdisp.2014.lsmeans
+
+
+# Plot
+p_betadisp_2014 <- ggplot(betadisper_2014, aes(x=Treatment, y=Distance_to_centroid)) +
+  geom_boxplot() +
+    geom_point(aes(colour=Treatment), position= position_jitterdodge(), size=3) +
+  labs(y= "Beta dispersion") +
+  ggtitle("a) Year 1 . ") +
+  theme_pubr(base_size = 16)+ 
+  scale_colour_manual(values=c("#29AF7FFF", "#440154FF"))
+p_betadisp_2014
+
+
+
+
+
+
+###### 2016 ######
+##################
+# Extract the data
+distance <- as.data.frame(mod_2016$distances)
+group <- as.data.frame(mod_2016$group)
+betadisper_2016 <- cbind(distance, group) %>%
+  dplyr::rename(Distance_to_centroid = "mod_2016$distances",
+         Treatment = "mod_2016$group")
+
+# subset the metadata 
+betadisp.2016.meta <- cover.compare.diversity.2016_wide %>%
+  select(New.Tile.Number, Year, Treatment, Original.Tile.Number,New.Site, Depth, Pair)
+
+# check they are in the same order
+betadisp.2016.meta$New.Tile.Number
+rownames(distance)
+# same order
+
+# combine all together 
+betadisp.2016.meta$beta.dispersion = paste(mod_2016$distances)
+betadisp.2016.meta$beta.dispersion <- as.numeric(betadisp.2016.meta$beta.dispersion)
+summary(betadisp.2016.meta$beta.dispersion)
+hist(betadisp.2016.meta$beta.dispersion) # looks a bit odd
+
+# change to factors
+betadisp.2016.meta$Treatment <- as.factor(betadisp.2016.meta$Treatment)
+betadisp.2016.meta$New.Site <- as.factor(betadisp.2016.meta$New.Site)
+betadisp.2016.meta$Depth <- as.factor(betadisp.2016.meta$Depth)
+betadisp.2016.meta$Pair <- as.factor(betadisp.2016.meta$Pair)
+
+
+
+
+
+# Linear Mixed Effects Model
+library(lme4)
+betadisp.2016.model1 <- lmer(beta.dispersion ~ Treatment + New.Site + Depth + (1 | Pair), data = betadisp.2016.meta) # singular
+summary(betadisp.2016.model1)
+car::Anova(betadisp.2016.model1, type=2)
+# Analysis of Deviance Table (Type II Wald chisquare tests)
+# 
+# Response: beta.dispersion
+#             Chisq Df Pr(>Chisq)    
+# Treatment 25.1693  1  5.251e-07 ***
+# New.Site  26.9991  2  1.372e-06 ***
+# Depth      2.8041  2     0.2461  
+
+
+# Try a few models to avoid singularity
+betadisp.2016.model2 <- lmer(beta.dispersion ~ Treatment + New.Site + (1 | Pair), data = betadisp.2016.meta) # singular
+
+betadisp.2016.model3 <- lmer(beta.dispersion ~ Treatment + Depth + (1 | Pair), data = betadisp.2016.meta) 
+summary(betadisp.2016.model3)
+car:: Anova(betadisp.2016.model3)
+# Analysis of Deviance Table (Type II Wald chisquare tests)
+# 
+# Response: beta.dispersion
+#             Chisq Df Pr(>Chisq)    
+# Treatment 19.7763  1  8.706e-06 ***
+# Depth      3.9979  2     0.1355    
+
+plot(betadisp.2016.model3) # looks good!
+qqnorm(resid(betadisp.2016.model3))
+
+betadisp.2016.model4 <- lmer(beta.dispersion ~ Treatment + (1 | Pair), data = betadisp.2016.meta) 
+summary(betadisp.2016.model4)
+car:: Anova(betadisp.2016.model4)
+
+
+# Simple Linear Model
+betadisp.2016.model5 <- lm(beta.dispersion ~ Treatment + New.Site + Depth, data = betadisp.2016.meta)
+summary(betadisp.2016.model5)
+car::Anova(betadisp.2016.model5, type=2)
+# Anova Table (Type II tests)
+# 
+# Response: beta.dispersion
+#            Sum Sq  Df F value    Pr(>F)    
+# Treatment 0.25320   1  25.169 1.662e-06 ***
+# New.Site  0.27161   2  13.500 4.633e-06 ***
+# Depth     0.02821   2   1.402    0.2497    
+# Residuals 1.32792 132                      
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+plot(betadisp.2016.model5)
+
+
+
+### Least Square Means ###
+library(emmeans)
+betadisp.2016.model5.eemeans <- emmeans(betadisp.2016.model5, "Treatment") 
+betadisp.2016.model5.eemeans
+pairs(betadisp.2016.model5.eemeans)
+#  contrast        estimate     SE  df t.ratio p.value
+#  Caged - Uncaged    0.086 0.0171 132 5.017   <.0001 
+# 
+# Results are averaged over the levels of: New.Site, Depth 
+
+
+# LSM Plot
+lsm.bdisp.2016 <- as.data.frame(summary(betadisp.2016.model5.eemeans))
+colnames(lsm.bdisp.2016)
+
+p_bdisp.2016.lsmeans <- ggplot(lsm.bdisp.2016, aes(x=Treatment, y=emmean, colour= Treatment)) +
+    geom_pointrange(aes(ymin= emmean-SE, ymax= emmean+SE), size=2, shape=17) +
+  labs(y= "",
+       x="") +
+  theme_pubr(base_size = 16) + 
+  scale_colour_manual(values=c("#29AF7FFF", "#440154FF")) +
+  guides(color=FALSE) +
+  ggtitle("b) Year 3 ***")
+p_bdisp.2016.lsmeans
+
+
+# Plot
+p_betadisp_2016 <- ggplot(betadisper_2016, aes(x=Treatment, y=Distance_to_centroid)) +
+  geom_boxplot() +
+    geom_point(aes(colour=Treatment), position= position_jitterdodge(), size=3, shape=17) +
+  labs(y= "") +
+  ggtitle("b) Year 3 ***") +
+  theme_pubr(base_size = 16) + 
+  scale_colour_manual(values=c("#29AF7FFF", "#440154FF"))
+p_betadisp_2016
+
+
+
+# Plot all together
+p_betadisp_ALL <- ggarrange(p_bdisp.2014.lsmeans, p_bdisp.2016.lsmeans,
+                            common.legend = TRUE,
+                            legend="none")
+p_betadisp_ALL
+ggsave(file= "../figures/cover/beta-dispersion-ALL.png",
+       plot=p_betadisp_ALL,
+       height=8,
+       width=14)
+```
+
+
+
+# Beta Deviation (Vanette and Fukami)
+Standardised effect size (β‐deviation) as the difference between the observed and mean expected dissimilarity, divided by the standard deviation of expected values.
+
+
+Note: Whenever you rerun the betadeviation calculation above, this will change the data slightly since its comparing to null models. So you will get slightly different results but overall its the same qualitative result. 
+
+## 2014
+```{r}
+##### Uncaged #####
+###################
+
+source("beta-deviation.r") # dependencies copied from tello and vanette r codes
+
+
+### Check/Prep Data ###
+# Taxa with Zero Abundances (i dont think they should have an effect?)
+colSums(cover.minor.diversity.2014.uncaged_data) == 0 # MACA,Non.Coral.Invertebrate, Coral, DICT
+
+cover.minor.diversity.2014.uncaged_data_filtered <- cover.minor.diversity.2014.uncaged_data[, colSums(cover.minor.diversity.2014.uncaged_data  != 0) > 0] # filter these out
+
+colSums(cover.minor.diversity.2014.uncaged_data_filtered) == 0 # none
+
+
+# Create dataset with full integers for beta deviation (square rooting prior to multiplying)
+cover.uncaged.2014_full.integers <- round(100*(sqrt(cover.minor.diversity.2014.uncaged_data_filtered)))
+head(cover.uncaged.2014_full.integers)
+range(cover.uncaged.2014_full.integers) # 0-98 
+
+# check data vs metadata
+# check data vs metadata
+view(cover.minor.diversity.2014.uncaged_data)
+view(cover.minor.diversity.2014.uncaged_wide)
+view(cover.uncaged.2014_full.integers)
+
+### Beta Deviation Code #### 
+# define list to populate below 
+beta.list <- list()
+  rand.results <- assemblages.from.pool.randA(compo=cover.uncaged.2014_full.integers, fix.local.abund=TRUE, fix.rSAD=TRUE, 
+  rand.N=999, save.output=FALSE) # 999 is the default from the Tello r code
+  null.compos <- rand.results$rand.datasets
+  null.matrices <- null.compos
+  
+compo <- cover.uncaged.2014_full.integers
+
+
+# Run the beta.ses function (from vanette and fukami r code)
+beta.ses.2014.uncaged <- beta.ses(compo, null.matrices) # this creates the beta deviation for each tile 
+dim(beta.ses.2014.uncaged) # 89 tiles by one beta deviation value
+dim(cover.uncaged.2014_full.integers) # 89 tiles by 9 taxa
+
+save(beta.ses.2014.uncaged, file= "../data/beta.ses.2014.uncaged.Rdata") # save this beta deviation (using this when the beta.ses function takes a while)
+load("../data/beta.ses.2014.uncaged.Rdata")
+head(beta.ses.2014.uncaged)
+
+
+# Combine with the metadata 
+cover.2014.uncaged.meta.beta <- cover.minor.diversity.2014.uncaged_wide
+cover.2014.uncaged.meta.beta$betadev = paste(beta.ses.2014.uncaged$V1)
+cover.2014.uncaged.meta.beta$betadev <- as.numeric(cover.2014.uncaged.meta.beta$betadev)
+summary(cover.2014.uncaged.meta.beta$betadev)
+hist(cover.2014.uncaged.meta.beta$betadev) # wow some outliers
+
+
+
+
+
+###### Caged ######
+###################
+
+#### Prep/Check the Data ###
+# any missing taxa?
+colSums(cover.minor.diversity.2014.caged_data) == 0 # no
+
+# Round the data to full numbers
+cover.caged.2014_full.integers <- round(100*(sqrt(cover.minor.diversity.2014.caged_data))) 
+range(cover.caged.2014_full.integers) # 0-98
+
+# check data vs metadata
+view(cover.minor.diversity.2014.caged_data)
+view(cover.minor.diversity.2014.caged_wide)
+view(cover.caged.2014_full.integers)
+
+### Beta Deviation Code ###
+# define the list to populate below (code from Leslie Decker/Rachel Vanette)
+beta.list <- list()
+
+  rand.results <- assemblages.from.pool.randA(compo=cover.caged.2014_full.integers, fix.local.abund=TRUE, fix.rSAD=TRUE, 
+  rand.N=999, save.output=FALSE)
+  null.compos <- rand.results$rand.datasets
+  null.matrices <- null.compos
+  
+compo<- cover.caged.2014_full.integers
+
+
+# calculate beta deviation 
+beta.ses.2014.caged <- beta.ses(compo, null.matrices) # this creates beta deviation
+dim(beta.ses.2014.caged) # 90tiles by one beta deviation value
+dim(cover.caged.2014_full.integers) # 90 tiles by 13 taxa
+head(beta.ses.2014.caged)
+
+save(beta.ses.2014.caged, file= "../data/beta.ses.2014.caged.Rdata") # save
+load("../data/beta.ses.2014.caged.Rdata")
+
+# Combine with the metadata 
+cover.2014.caged.meta.beta <- cover.minor.diversity.2014.caged_wide # create new df with metadata
+cover.2014.caged.meta.beta$betadev = paste(beta.ses.2014.caged$V1) # add in the beta deviation
+cover.2014.caged.meta.beta$betadev <- as.numeric(cover.2014.caged.meta.beta$betadev) # change to numeric values
+summary(cover.2014.caged.meta.beta$betadev) # no negative values unlike hte uncaged
+hist(cover.2014.caged.meta.beta$betadev) # looks better than uncaged, but still has outliers
+
+
+
+
+
+### Plot Caged vs Uncaged ####
+######################################
+# Combined caged and uncaged together
+cover.2014.beta <- rbind(cover.2014.caged.meta.beta, cover.2014.uncaged.meta.beta)
+
+# Plot
+p_betadev_2014 <- ggplot(cover.2014.beta, aes(x=Treatment, y=betadev)) +
+  geom_boxplot() +
+    geom_point(aes(colour=Treatment), position= position_jitterdodge(), size=3, shape=16) +
+  labs(y= "Beta deviation (standardized effect size)") +
+  ggtitle("c) Year 1 *") +
+  theme_pubr(base_size = 16)+ 
+  scale_colour_manual(values=c("#29AF7FFF", "#440154FF"))
+
+p_betadev_2014
+ggsave(file= "../figures/cover/beta-deviation-2014.pdf",
+       plot=p_betadev_2014,
+       height=8,
+       width=10)
+```
+
+
+
+
+
+
+### Models
+```{r}
+# change to factors
+cover.2014.beta$Treatment <- as.factor(cover.2014.beta$Treatment)
+cover.2014.beta$New.Site <- as.factor(cover.2014.beta$New.Site)
+cover.2014.beta$Depth <- as.factor(cover.2014.beta$Depth)
+cover.2014.beta$Pair <- as.factor(cover.2014.beta$Pair)
+
+
+## Simple linear regression ##
+betadev.2014.model1 <- lm(betadev ~ Treatment + New.Site + Depth, data = cover.2014.beta)
+summary(betadev.2014.model1)
+# Call:
+# lm(formula = betadev ~ Treatment + New.Site + Depth, data = cover.2014.beta)
+# 
+# Residuals:
+#     Min      1Q  Median      3Q     Max 
+# -285.93  -98.99  -20.65   62.66  424.52 
+# 
+# Coefficients:
+#                  Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)        324.30      27.07  11.979   <2e-16 ***
+# TreatmentUncaged   -49.64      22.16  -2.240   0.0263 *  
+# New.SiteFR7         66.26      27.06   2.449   0.0153 *  
+# New.SiteFR9         38.50      27.18   1.417   0.1584    
+# DepthMiddle         34.58      27.18   1.273   0.2049    
+# DepthShallow        14.29      27.18   0.526   0.5997    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 148.2 on 173 degrees of freedom
+# Multiple R-squared:  0.0683,	Adjusted R-squared:  0.04137 
+# F-statistic: 2.536 on 5 and 173 DF,  p-value: 0.03037
+
+anova(betadev.2014.model1)
+anova(betadev.2014.model1, test="LRT") # same as above
+
+car::Anova(betadev.2014.model1, type=2)
+# Anova Table (Type II tests)
+# 
+# Response: betadev
+#           Sum Sq  Df F value  Pr(>F)  
+# Treatment  135.9   1  3.8547 0.05121 .
+# New.Site   191.1   2  2.7103 0.06935 .
+# Depth       23.6   2  0.3341 0.71646  
+# Residuals 6098.8 173                  
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+# Diagnostic Plots
+plot(betadev.2014.model1) # qq looks bad and residuals vs fitted doesnt look great
+# relaly big outliers that make the plots look bad: 137, 141, 13
+# try filtering these out
+
+range(cover.2014.beta$betadev) # -4.47296 38.74734
+# Residuals vs fitted: homogeneity, we dont want to see a pattern
+# QQ: normality
+# Scale-Location: can also be used to look at homogeneity
+
+
+
+
+
+
+### Linear Mixed Effects Model ###
+library(lme4)
+betadev.2014.model3 <- lmer(betadev ~ Treatment + New.Site + Depth + (1 | Pair), data = cover.2014.beta)
+summary(betadev.2014.model3)
+anova(betadev.2014.model3)
+car::Anova(betadev.2014.model3, type=2)
+# Analysis of Deviance Table (Type II Wald chisquare tests)
+# 
+# Response: betadev
+#            Chisq Df Pr(>Chisq)  
+# Treatment 3.8843  1    0.04874 *
+# New.Site  5.3767  2    0.06799 .
+# Depth     0.6627  2    0.71797  
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+
+# Model Diagnostics
+plot(betadev.2014.model3) # blergh doens't look good, there are a few outliers making it not look great
+
+# fitted vs residual with smooth line
+plot(betadev.2014.model3, type=c("p","smooth"), col.line=1)
+
+#Scale-location
+plot(betadev.2014.model3,
+     sqrt(abs(resid(.)))~fitted(.),
+     type=c("p","smooth"), col.line=1)
+
+# QQnorm
+qqnorm(resid(betadev.2014.model3))
+
+library(MuMIn)
+MuMIn::r.squaredGLMM(betadev.2014.model3)
+#          R2m        R2c
+# [1,] 0.05282668 0.06036664
+
+
+
+# Seems like there are outliers, filter them out
+hist(cover.2014.beta$betadev) # try to get rid of some of the right skew
+data <- cover.2014.beta %>%
+  filter(betadev < 30)
+
+dim(data) # this filters out four, 175
+dim(cover.2014.beta) # 179
+
+
+betadev.2014.model4 <- lmer(betadev ~ Treatment + New.Site + Depth + (1 | Pair), data = data) # singular
+# singular doesn't change if you take out fixed effects
+# JK, it does for the model below in 2016, just not this one 
+
+plot(betadev.2014.model4) # looks much better
+
+summary(betadev.2014.model4) # singular
+car::Anova(betadev.2014.model4, type=2)
+# Analysis of Deviance Table (Type II Wald chisquare tests)
+# 
+# Response: betadev
+#            Chisq Df Pr(>Chisq)   
+# Treatment 7.3633  1   0.006657 **
+# New.Site  3.1326  2   0.208813   
+# Depth     0.1786  2   0.914582   
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+
+# Try LM again without the outliers, since the lmer was singular
+betadev.2014.model5 <- lm(betadev ~ Treatment + New.Site + Depth, data = data)
+summary(betadev.2014.model5) # Adjusted R-squared:  0.03353 
+plot(betadev.2014.model5) # looks much better
+car::Anova(betadev.2014.model5, type=2)
+# Anova Table (Type II tests)
+# 
+# Response: betadev
+#           Sum Sq  Df F value Pr(>F)  
+# Treatment  148.1   1  6.6439 0.0108 *
+# New.Site    84.5   2  1.8962 0.1533  
+# Depth       18.1   2  0.4065 0.6667  
+# Residuals 3766.9 169                 
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+
+# Similar results
+# LMER with all data: treatment is sig, site is almost sig (but model residuals have outliers)
+# LMER with outliers filtered: singular, treatment is sig (diagnostics look good)
+# LM with outliers filtered: treatment is sig (diagnostics look good)
+
+
+
+### Least Square Means ###
+library(emmeans)
+lsm.bd.2014.model3 <- emmeans(betadev.2014.model3, "Treatment") # full original lmer model with outliers
+lsm.bd.2014.model3 
+pairs(lsm.bd.2014.model3)
+# contrast        estimate    SE   df t.ratio p.value
+#  Caged - Uncaged     1.73 0.889 88.7 1.943   0.0552 
+# almost significant
+
+lsm.bd.2014.model4 <- emmeans(betadev.2014.model4, "Treatment") # singular, outliers filtered, lmer
+lsm.bd.2014.model4 
+pairs(lsm.bd.2014.model4)
+ # contrast        estimate    SE   df t.ratio p.value
+ # Caged - Uncaged     1.84 0.714 87.7 2.577   0.0116 
+
+
+lsm.bd.2014.model5 <- emmeans(betadev.2014.model5, "Treatment") # outlier filtered, lm
+lsm.bd.2014.model5 
+pairs(lsm.bd.2014.model5)
+# contrast        estimate    SE  df t.ratio p.value
+#  Caged - Uncaged     1.84 0.714 169 2.578   0.0108 
+
+
+
+
+# Plot of Lsmeans
+# reporting full lmer with outliers 
+lsm.bdev.2014 <- as.data.frame(summary(lsm.bd.2014.model3))
+colnames(lsm.bdev.2014)
+
+p_bdev.2014.lsmeans <- ggplot(lsm.bdev.2014, aes(x=Treatment, y=emmean, colour= Treatment)) +
+    geom_pointrange(aes(ymin= emmean-SE, ymax= emmean+SE), size=2) +
+  labs(y= "Beta deviation (standardized effect size)") +
+  theme_pubr(base_size = 16) + 
+  scale_colour_manual(values=c("#29AF7FFF", "#440154FF")) +
+  guides(color=FALSE) +
+  ggtitle("c) Year 1 .")
+p_bdev.2014.lsmeans
+```
+
+
+
+
+https://stats.stackexchange.com/questions/378939/dealing-with-singular-fit-in-mixed-models
+
+## 2016
+```{r}
+##### Uncaged #####
+###################
+
+### Prep/Check the Data ###
+# Any taxa with zero abundance?
+colSums(cover.compare.diversity.2016.uncaged_data) == 0 # MACA, MACA1, MACA4, MACA5
+
+cover.compare.diversity.2016.uncaged_data_filtered <- cover.compare.diversity.2016.uncaged_data[, colSums(cover.compare.diversity.2016.uncaged_data  != 0) > 0] # filter these out
+
+colSums(cover.compare.diversity.2016.uncaged_data_filtered) == 0
+
+# Make the data full integers (square root before multiplying)
+cover.uncaged.2016_full.integers <- round(100*(sqrt(cover.compare.diversity.2016.uncaged_data_filtered))) 
+range(cover.uncaged.2016_full.integers) # 0-94
+
+# compare metadata vs data
+view(cover.compare.diversity.2016.uncaged_data)
+view(cover.compare.diversity.2016.uncaged_wide)
+view(cover.uncaged.2016_full.integers)
+
+
+
+#### Beta Deviation Code ####
+# define list to populate below
+beta.list <- list()
+
+  rand.results <- assemblages.from.pool.randA(compo=cover.uncaged.2016_full.integers, fix.local.abund=TRUE, fix.rSAD=TRUE, 
+  rand.N=999, save.output=FALSE)
+  null.compos <- rand.results$rand.datasets
+  null.matrices <- null.compos
+  
+compo<- cover.uncaged.2016_full.integers
+
+# Beta.ses code 
+beta.ses.2016.uncaged <- beta.ses(compo, null.matrices) # this creates beta deviation for each tile
+dim(beta.ses.2016.uncaged) # 71 tiles
+dim(cover.uncaged.2016_full.integers) # 71 tiles
+
+save(beta.ses.2016.uncaged, file= "../data/beta.ses.2016.uncaged.Rdata")
+load("../data/beta.ses.2016.uncaged.Rdata")
+
+# Combine with the metadata 
+cover.2016.uncaged.meta.beta <- cover.compare.diversity.2016.uncaged_wide # new df to include metadata
+cover.2016.uncaged.meta.beta$betadev = paste(beta.ses.2016.uncaged$V1) # add in betadeviation
+cover.2016.uncaged.meta.beta$betadev <- as.numeric(cover.2016.uncaged.meta.beta$betadev)
+summary(cover.2016.uncaged.meta.beta$betadev) # no negative values
+hist(cover.2016.uncaged.meta.beta$betadev) # wierd distribution that is skewed left
+
+
+
+
+
+####### Caged ########
+######################
+
+#### Prep/Check the Data ####
+# Any taxa with zero abundance?
+colSums(cover.compare.diversity.2016.caged_data) == 0 # FALSE
+
+# Make the data full integers 
+cover.caged.2016_full.integers <- round(100*(sqrt(cover.compare.diversity.2016.caged_data))) 
+range(cover.caged.2016_full.integers) # 0-97
+
+# compare metadata and data
+view(cover.compare.diversity.2016.caged_data)
+view(cover.compare.diversity.2016.caged_wide)
+view(cover.caged.2016_full.integers)
+
+
+
+#### Beta Deviation Code ####
+# create a list to fill
+beta.list <- list()
+
+  rand.results <- assemblages.from.pool.randA(compo=cover.caged.2016_full.integers, fix.local.abund=TRUE, fix.rSAD=TRUE, 
+  rand.N=999, save.output=FALSE)
+  null.compos <- rand.results$rand.datasets
+  null.matrices <- null.compos
+  
+compo<- cover.caged.2016_full.integers
+
+# calculate beta deviation
+beta.ses.2016.caged <- beta.ses(compo, null.matrices) # this creates beta deviation value for each tile
+dim(beta.ses.2016.caged) # 67 tiles
+dim(cover.caged.2016_full.integers) # 67 tiles
+
+save(beta.ses.2016.caged, file= "../data/beta.ses.2016.caged.Rdata")
+load("../data/beta.ses.2016.caged.Rdata")
+
+# Combine with the metadata 
+cover.2016.caged.meta.beta <- cover.compare.diversity.2016.caged_wide
+cover.2016.caged.meta.beta$betadev = paste(beta.ses.2016.caged$V1)
+cover.2016.caged.meta.beta$betadev <- as.numeric(cover.2016.caged.meta.beta$betadev)
+summary(cover.2016.caged.meta.beta$betadev) # no negative values
+hist(cover.2016.caged.meta.beta$betadev) # ok?
+
+
+
+
+### Plot Caged and Uncaged ###
+##############################
+# Combined caged and uncaged together
+cover.2016.beta <- rbind(cover.2016.caged.meta.beta, cover.2016.uncaged.meta.beta)
+
+# Plot
+p_betadev_2016 <- ggplot(cover.2016.beta, aes(x=Treatment, y=betadev)) +
+  geom_boxplot() +
+  geom_point(aes(colour=Treatment), position= position_jitterdodge(), size=3, shape=17) +
+  labs(y= "Beta deviation (standardized effect size)") +
+  ggtitle("d) Year 3 ***") +
+  theme_pubr(base_size = 16)+ 
+  scale_colour_manual(values=c("#29AF7FFF", "#440154FF"))
+
+p_betadev_2016 
+ggsave(file= "../figures/cover/beta-deviation-2016.pdf",
+       plot=p_betadev_2016,
+       height=8,
+       width=10)
+
+```
+
+
+
+### Models
+```{r}
+# change to factors
+cover.2016.beta$Treatment <- as.factor(cover.2016.beta$Treatment)
+cover.2016.beta$New.Site <- as.factor(cover.2016.beta$New.Site)
+cover.2016.beta$Depth <- as.factor(cover.2016.beta$Depth)
+cover.2016.beta$Pair <- as.factor(cover.2016.beta$Pair)
+
+
+### Simple Linear Regression ###
+betadev.2016.model1 <- lm(betadev ~ Treatment + New.Site + Depth, data = cover.2016.beta)
+summary(betadev.2016.model1) # Adjusted R-squared:  0.219
+
+car::Anova(betadev.2016.model1, type=2)
+# Anova Table (Type II tests)
+# 
+# Response: betadev
+#           Sum Sq  Df F value    Pr(>F)    
+# Treatment  835.2   1 22.1645 6.242e-06 ***
+# New.Site   667.4   2  8.8556 0.0002461 ***
+# Depth      135.1   2  1.7933 0.1704333    
+# Residuals 4973.9 132                      
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+# Diagnostic plots 
+plot(betadev.2016.model1) # looks ok but not great
+hist(cover.2016.beta$betadev) # looks pretty normal, but residuals are more important
+
+
+
+
+### Linear Mixed Effects Model ###
+library(lme4)
+betadev.2016.model3 <- lmer(betadev ~ Treatment + New.Site + Depth + (1|Pair), data = cover.2016.beta) # singular
+summary(betadev.2016.model3)
+# but, if we take out site and depth, then it will run, see lines below
+
+car::Anova(betadev.2016.model3, type=2) # singular model
+# nalysis of Deviance Table (Type II Wald chisquare tests)
+# 
+# Response: betadev
+#             Chisq Df Pr(>Chisq)    
+# Treatment 22.6765  1  1.917e-06 ***
+# New.Site  17.2971  2  0.0001754 ***
+# Depth      3.7293  2  0.1549496    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+plot(betadev.2016.model3) # singular model
+
+# Try taking out some fixed effects
+betadev.2016.model4 <- lmer(betadev ~ Treatment + New.Site + (1|Pair), data = cover.2016.beta) #singular
+
+betadev.2016.model5 <- lmer(betadev ~ Treatment + (1|Pair), data = cover.2016.beta) # works!
+summary(betadev.2016.model5)
+car::Anova(betadev.2016.model5)
+# Analysis of Deviance Table (Type II Wald chisquare tests)
+# 
+# Response: betadev
+#           Chisq Df Pr(>Chisq)    
+# Treatment 20.35  1   6.45e-06 ***
+plot(betadev.2016.model5) # looks good!
+r.squaredGLMM(betadev.2016.model5)
+#            R2m       R2c
+# [1,] 0.1164348 0.2308259
+
+
+# Full model is singular 
+# Treatment and tile pair: diagnostics look great, and treatment is significant
+# LM witout tile pair: treatment and site are significant, diagnostics look ok
+# Let's go with full model without tile pair because it accounts for site and depth and is less complex
+
+
+
+
+
+### Least Square Means ###
+
+lsm.bd.2016.model1 <- emmeans(betadev.2016.model1, "Treatment") # lm 
+lsm.bd.2016.model1
+pairs(lsm.bd.2016.model1)
+ # contrast        estimate   SE  df t.ratio p.value
+ # Caged - Uncaged     5.02 1.04 132 4.811   <.0001 
+
+lsm.bd.2016.model5 <- emmeans(betadev.2016.model5, "Treatment") # lmer with treatment and pair
+lsm.bd.2016.model5
+pairs(lsm.bd.2016.model5)
+ # contrast        estimate   SE   df t.ratio p.value
+ # Caged - Uncaged     4.77 1.05 71.8 4.547   <.0001 
+
+
+# Plot of Lsmeans
+# reporting full lm (no tile pair included)
+lsm.bdev.2016 <- as.data.frame(summary(lsm.bd.2016.model1))
+colnames(lsm.bdev.2016)
+
+p_bdev.2016.lsmeans <- ggplot(lsm.bdev.2016, aes(x=Treatment, y=emmean, colour= Treatment)) +
+    geom_pointrange(aes(ymin= emmean-SE, ymax= emmean+SE), size=2, shape=17) +
+  labs(y= "") +
+  theme_pubr(base_size = 16) + 
+  scale_colour_manual(values=c("#29AF7FFF", "#440154FF")) +
+  guides(color=FALSE) +
+  ggtitle("d) Year 3 ***")
+p_bdev.2016.lsmeans
+
+
+
+
+# Plot all together
+p_betadev_ALL <- ggarrange(p_bdev.2014.lsmeans, p_bdev.2016.lsmeans ,
+                            common.legend = TRUE,
+                            legend="bottom")
+p_betadev_ALL
+ggsave(file= "../figures/cover/beta-deviation-ALL.png",
+       plot=p_betadev_ALL,
+       height=8,
+       width=14)
+```
+
+
+
+
+
+```{r}
+# Trying out combining 2014 and 2016
+dim(cover.2014.beta)
+colnames(cover.2014.beta)
+dim(cover.2016.beta)
+colnames(cover.2016.beta)
+
+
+combine.2014 <- cover.2014.beta %>%
+  select(New.Tile.Number, Year, New.Site, Depth, Treatment, Pair, betadev)
+
+colnames(combine.2014)
+
+combine.2016 <- cover.2016.beta %>%
+  select(New.Tile.Number, Year, New.Site, Depth, Treatment, Pair, betadev)
+
+colnames(combine.2016)
+
+betadeviation <- rbind(combine.2014, combine.2016)
+betadeviation
+
+
+# change to factors
+betadeviation$Treatment <- as.factor(betadeviation$Treatment)
+betadeviation$New.Site <- as.factor(betadeviation$New.Site)
+betadeviation$Depth <- as.factor(betadeviation$Depth)
+betadeviation$Pair <- as.factor(betadeviation$Pair)
+betadeviation$Year <- as.factor(betadeviation$Year)
+betadeviation$New.Tile.Number <- as.factor(betadeviation$New.Tile.Number)
+
+str(betadeviation)
+
+# Linear Mixed Effects Model
+full.betadev.model1 <- lmer(betadev ~ Treatment * Year + New.Site + Depth + (1|New.Tile.Number), data = betadeviation)
+# can't run with both pair and new tile number (singular with pair only as well)
+
+summary(full.betadev.model1)
+plot(full.betadev.model1)
+car::Anova(full.betadev.model1)
+library(MuMIn)
+r.squaredGLMM(full.betadev.model1)
+
+
+```
+
+
+## Plot 2014&2016
+```{r}
+# Combine beta dispersion and deviation (FIGURE 3)
+# Plot all together
+p_betadisp_betadev <- ggarrange(p_betadisp_ALL, p_betadev_ALL,
+                            common.legend = TRUE,
+                            nrow=2,
+                            legend="bottom")
+p_betadisp_betadev
+ggsave(file= "../figures/cover/beta-dispersion-deviation-ALL.png",
+       plot=p_betadisp_betadev,
+       height=10,
+       width=10)
+```
+
+
+
+
+
+# TBI
+Temporal beta diversity index: 
+https://www.rdocumentation.org/packages/adespatial/versions/0.3-8/topics/TBI
+
+
+```{r}
+library(adespatial)
+
+###### Caged ######
+####################
+### Checking Data ###
+rownames(timeseries.cover.caged.2014_data)
+rownames(timeseries.cover.caged.2016_data)
+
+dim(timeseries.cover.caged.2014_data) # 67 18
+dim(timeseries.cover.caged.2016_data) # 67 18
+
+# Any zero sum species?
+colSums(timeseries.cover.caged.2014_data) == 0 # MACA1, MACA2, MACA3,MACA4,MACA5, MACA6, 
+colSums(timeseries.cover.caged.2016_data) == 0 # CYAN, MACA2, 
+
+# so only MACA2? because of the overlap between the two time points
+test1 <- timeseries.cover.caged.2014_data %>%
+  select(-MACA2)
+dim(test1)
+
+test2 <- timeseries.cover.caged.2016_data %>%
+  select(-MACA2)
+dim(test2)
+
+
+
+
+##### TBI Model ####
+# Test model with MACA2 filtered out (because it was zero abundance in both years)
+test.tbi <- TBI(sqrt(test1),
+            sqrt(test2), 
+            method = "%diff", nperm = 9999, # % diff is bray curtis
+            test.t.perm = TRUE)
+mean(test.tbi$TBI) # 0.3999484
+# yes same as below without MACA2 filtered out
+# so it doesn't matter and we can continue with this df
+
+
+# TBI Model (without filtering)
+caged.tbi <- TBI(sqrt(timeseries.cover.caged.2014_data),
+            sqrt(timeseries.cover.caged.2016_data), 
+            method = "%diff", nperm = 9999, # % diff is bray curtis
+            test.t.perm = TRUE)
+mean(caged.tbi$TBI) # 0.3999484
+# same as above with MACA2 filtered out
+
+summary(caged.tbi)
+caged.tbi$BCD.mat
+caged.tbi$t.test_B.C # paired t-test of the difference between columsn C and B, assymetry between species gains and loses 
+plot(caged.tbi, main= "Caged, %Diff")
+
+mean(caged.tbi$TBI) #dissimilarities among time points, 0.3999484
+std.error(caged.tbi$TBI) # 0.01777889
+caged.tbi$BC #number of taxa lost (B) and gained (C)
+caged.tbi$BCD.mat #relative contributions of gains and losses
+
+
+
+#### Create Dataframes #####
+# Pull out species losses and gains
+colnames(caged.tbi$BCD.mat)
+caged.B <- (caged.tbi$BCD.mat)$"B/(2A+B+C)"
+caged.C <- (caged.tbi$BCD.mat)$"C/(2A+B+C)"
+caged.D <- (caged.tbi$BCD.mat)$"D=(B+C)/(2A+B+C)" # this is the same as TBI
+
+# Pull out TBI and rename columns
+caged.tbi.df <- as.data.frame(caged.tbi$TBI) %>%
+  dplyr::rename(TBI = "caged.tbi$TBI")
+
+caged.B.df <- as.data.frame(caged.B) %>%
+  dplyr::rename(B = "caged.B")
+
+caged.C.df <- as.data.frame(caged.C) %>%
+  dplyr::rename(C = "caged.C")
+
+
+# Adding in Metadata
+dim(caged.tbi.df) # 67  1
+dim(timeseries.cover.caged.2014_wide) #67 28
+head(timeseries.cover.caged.2014_wide)
+str(timeseries.cover.caged.2014_wide) 
+
+# Checking the order
+timeseries.cover.caged.2014_wide$New.Tile.Number # used below as metadata
+rownames(timeseries.cover.caged.2014_data) # data was used to create tbi values so they are in the same order
+rownames(timeseries.cover.caged.2016_data)
+# yes, they are the same order
+
+
+# Combine metadata and TBI 
+caged.tbi.df.meta <- cbind(caged.tbi.df,
+                           caged.B.df, 
+                           caged.C.df,
+                           timeseries.cover.caged.2014_wide)
+# just need to add one time point for the metadata 
+
+
+
+
+
+
+####### Uncaged #######
+#######################
+### Checking data ###
+rownames(timeseries.cover.uncaged.2014_data)
+rownames(timeseries.cover.uncaged.2016_data)
+
+dim(timeseries.cover.uncaged.2014_data) # 71 18
+dim(timeseries.cover.uncaged.2016_data) # 71 18
+
+# Any zero sum species?
+colSums(timeseries.cover.uncaged.2014_data) == 0 # Coral, DICT, MACA, MACA2, Non.coral.inv, MACA3, MACA1, MACA4, MACA5, MACA6
+colSums(timeseries.cover.uncaged.2016_data) == 0 # CYAN,MACA, MACA2, MACA1, MACA4, MACA5
+
+# MACA, MACA2, MACA1, Maca4, MACA5
+
+
+# try filtering them out
+test3 <- timeseries.cover.uncaged.2014_data %>%
+  select(-c(MACA,MACA2,MACA1, MACA4,MACA5))
+dim(test3)
+
+test4 <- timeseries.cover.uncaged.2016_data %>%
+  select(-c(MACA,MACA2,MACA1, MACA4,MACA5))
+dim(test4)
+
+
+
+
+#### TBI Model ###
+# Test model with taxa filtered out
+test.tbi <- TBI(sqrt(test3),
+            sqrt(test4), 
+            method = "%diff", nperm = 9999, # % diff is bray curtis
+            test.t.perm = TRUE)
+mean(test.tbi$TBI) # 0.2635818
+# yes same as below without anything filtered out
+# so it doesn't matter and we can continue with this df
+
+
+# TBI model without filtering
+uncaged.tbi <- TBI(sqrt(timeseries.cover.uncaged.2014_data),
+            sqrt(timeseries.cover.uncaged.2016_data), 
+            method = "%diff", nperm = 9999, 
+            test.t.perm = TRUE)
+mean(uncaged.tbi$TBI) # 0.2635818
+summary(uncaged.tbi) 
+uncaged.tbi$BCD.mat
+plot(uncaged.tbi, main= "Uncaged, %Diff")
+
+
+
+### Create Dataframes ###
+# Pull out species losses and gains
+colnames(uncaged.tbi$BCD.mat)
+uncaged.B <- (uncaged.tbi$BCD.mat)$"B/(2A+B+C)"
+uncaged.C <- (uncaged.tbi$BCD.mat)$"C/(2A+B+C)"
+uncaged.D <- (uncaged.tbi$BCD.mat)$"D=(B+C)/(2A+B+C)" # this is the same as TBI
+
+uncaged.tbi$BC #number of taxa lost (B) and gained (C)
+uncaged.tbi$BCD.mat #relative contributions of gains and losses
+uncaged.tbi$TBI
+
+
+# Pull out TBI, B, C and rename the columns
+uncaged.tbi.df <- as.data.frame(uncaged.tbi$TBI) %>%
+  dplyr::rename(TBI = "uncaged.tbi$TBI")
+
+uncaged.B.df <- as.data.frame(uncaged.B) %>%
+  dplyr::rename(B = "uncaged.B")
+
+uncaged.C.df <- as.data.frame(uncaged.C) %>%
+  dplyr::rename(C = "uncaged.C")
+
+# Checking data
+rownames(timeseries.cover.uncaged.2014_data)
+rownames(timeseries.cover.uncaged.2016_data) # this is what the tbi model was based on so row order stays the same
+timeseries.cover.uncaged.2014_wide$New.Tile.Number
+# yes they are the same
+
+head(timeseries.cover.uncaged.2014_wide)
+dim(timeseries.cover.uncaged.2014_wide) # 71 28
+dim(uncaged.tbi.df) # 71  1
+
+# Add the metadata 
+uncaged.tbi.df.meta <- cbind(uncaged.tbi.df,
+                             uncaged.B.df,
+                             uncaged.C.df,
+                             timeseries.cover.uncaged.2014_wide)
+
+uncaged.tbi.df.meta
+```
+
+
+
+
+```{r}
+#### PLOTS ####
+###############
+all.tbi.df <- rbind(caged.tbi.df.meta, uncaged.tbi.df.meta)
+names(all.tbi.df)
+
+
+p_TBI.bray <- ggplot(all.tbi.df, aes(x=Treatment, y=TBI)) +
+  geom_boxplot() +
+    geom_point(aes(colour=Treatment), 
+               position= position_jitterdodge(), size=4, shape=18) +
+  labs(y= "Temporal Beta-diversity Index") +
+  ggtitle("***") +
+  theme_pubr(base_size = 16)+ 
+  scale_colour_manual(values=c("#29AF7FFF", "#440154FF")) +
+  guides(color=FALSE)
+p_TBI.bray
+
+
+p_B.bray <- ggplot(all.tbi.df, aes(x=Treatment, y=B)) +
+  geom_boxplot() +
+    geom_point(aes(colour=Treatment), 
+               position= position_jitterdodge(), size=4, shape=18) +
+  labs(y= "Species Loss (B)") +
+  theme_pubr(base_size = 16)+ 
+  scale_colour_manual(values=c("#29AF7FFF", "#440154FF")) +
+  guides(color=FALSE)
+p_B.bray
+
+
+p_C.bray <- ggplot(all.tbi.df, aes(x=Treatment, y=C)) +
+  geom_boxplot() +
+    geom_point(aes(colour=Treatment), 
+               position= position_jitterdodge(), size=4, shape=18) +
+  labs(y= "Species Gain (C)") +
+  theme_pubr(base_size = 16)+ 
+  scale_colour_manual(values=c("#29AF7FFF", "#440154FF")) +
+  guides(color=FALSE)
+p_C.bray
+
+
+
+
+# Save B-C plots for supplementary
+png("../figures/cover/caged-b.c-plot.png", height=500, width=500)
+plot(caged.tbi, main= "Caged, %Diff")
+dev.off()
+
+
+png("../figures/cover/uncaged-b.c-plot.png", height=500, width=500)
+plot(uncaged.tbi, main= "Uncaged, %Diff")
+dev.off()
+
+```
+
+
+### Models
+#### TBI
+```{r}
+####### Linear Models #######
+######## TBI ################
+
+# change to factors
+str(all.tbi.df)
+all.tbi.df$Treatment <- as.factor(all.tbi.df$Treatment)
+all.tbi.df$New.Site <- as.factor(all.tbi.df$New.Site)
+all.tbi.df$Depth <- as.factor(all.tbi.df$Depth)
+all.tbi.df$Pair <- as.factor(all.tbi.df$Pair)
+
+
+# Simple Linear Regression
+tbi.model1 <- lm(TBI ~ Treatment + New.Site + Depth, data = all.tbi.df)
+summary(tbi.model1)
+# Coefficients:
+#                   Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)       0.418992   0.025965  16.137  < 2e-16 ***
+# TreatmentUncaged -0.135902   0.022802  -5.960 2.17e-08 ***
+# New.SiteFR7       0.006683   0.028815   0.232   0.8170    
+# New.SiteFR9       0.010536   0.026540   0.397   0.6920    
+# DepthMiddle      -0.049178   0.027714  -1.774   0.0783 .  
+# DepthShallow     -0.027393   0.027770  -0.986   0.3257    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 0.1335 on 132 degrees of freedom
+# Multiple R-squared:  0.2299,	Adjusted R-squared:  0.2007 
+# F-statistic: 7.881 on 5 and 132 DF,  p-value: 1.603e-06
+
+car::Anova(tbi.model1, type=2)
+# Anova Table (Type II tests)
+# 
+# Response: TBI
+#            Sum Sq  Df F value    Pr(>F)    
+# Treatment 0.63290   1 35.5212 2.166e-08 ***
+# New.Site  0.00292   2  0.0819    0.9214    
+# Depth     0.05660   2  1.5883    0.2082    
+# Residuals 2.35192 132                      
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+anova(tbi.model1)
+# Analysis of Variance Table
+# 
+# Response: TBI
+#            Df  Sum Sq Mean Sq F value    Pr(>F)    
+# Treatment   1 0.64102 0.64102 35.9766 1.802e-08 ***
+# New.Site    2 0.00446 0.00223  0.1250    0.8826    
+# Depth       2 0.05660 0.02830  1.5883    0.2082    
+# Residuals 132 2.35192 0.01782                      
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# exactly the same as above!
+
+
+
+# Model Diagnostics
+range(all.tbi.df$TBI) #0.04672231 0.84313158
+hist(all.tbi.df$TBI) # looks good, but the most imp thing to check is residuals
+plot(tbi.model1) # looks pretty good
+
+
+
+
+#### Generalized Linear Model
+tbi.model2 <- glm(TBI ~ Treatment + New.Site + Depth, data = all.tbi.df, family= Gamma(link="inverse"))
+summary(tbi.model2)
+
+car::Anova(tbi.model2)
+# yes we get similar results
+
+anova(tbi.model2, test="Chisq")
+
+# Model Diagnostics
+plot(tbi.model2)
+
+
+
+#### Linear Mixed Effects Model
+library(lme4)
+tbi.model3 <- lmer(TBI ~ Treatment + New.Site + Depth + (1 | Pair), data = all.tbi.df)
+summary(tbi.model3)
+car::Anova(tbi.model3, type=2) # same results as lm and glm
+# Analysis of Deviance Table (Type II Wald chisquare tests)
+# 
+# Response: TBI
+#             Chisq Df Pr(>Chisq)    
+# Treatment 37.3857  1  9.693e-10 ***
+# New.Site   0.1679  2     0.9195    
+# Depth      3.1208  2     0.2101    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+library(MuMIn)
+r.squaredGLMM(tbi.model3)
+#            R2m       R2c
+# [1,] 0.2243787 0.2662891
+
+# Model Diagnostics
+plot(tbi.model3) # looks ok
+qqnorm(residuals(tbi.model3)) # looks good
+
+
+
+
+
+#### eemeans (post hoc analysis)
+library(emmeans)
+lsm.tbi <- emmeans(tbi.model3, "Treatment")
+lsm.tbi
+pairs(lsm.tbi) # we only have two comparisons, so no tukey adjustment needed
+#  contrast        estimate     SE  df t.ratio p.value
+#  Caged - Uncaged    0.136 0.0228 132 5.960   <.0001 
+# 
+# Results are averaged over the levels of: New.Site, Depth 
+
+
+
+### Plot of Lsmeans for TBI
+lsm.tbi.df <- as.data.frame(summary(lsm.tbi))
+colnames(lsm.tbi.df)
+
+p_TBI.lsmeans <- ggplot(lsm.tbi.df, aes(x=Treatment, y=emmean, colour= Treatment)) +
+    geom_pointrange(aes(ymin= emmean-SE, ymax= emmean+SE), size=2, shape=18) +
+  labs(y= "Temporal Beta Diversity", x="") +
+  ggtitle("***") +
+  theme_pubr(base_size = 16) + 
+  scale_colour_manual(values=c("#29AF7FFF", "#440154FF")) +
+  guides(color=FALSE) +
+  theme(axis.text.x=element_blank()) + 
+  ggtitle("a) ***")
+p_TBI.lsmeans
+
+
+
+ggsave(file= "../figures/cover/TBI-lsmeans.png",
+       plot=p_TBI.lsmeans,
+       height=6,
+       width=8)
+```
+
+
+
+#### B
+```{r}
+######## Species Loss (B) ################
+##########################################
+range(all.tbi.df$B) # 0.01970578 0.44055067
+
+# Simple Linear Regression
+b.model1 <- lm(B ~ Treatment + New.Site + Depth, data = all.tbi.df)
+summary(b.model1)
+car::Anova(b.model1, type=2)
+# Anova Table (Type II tests)
+# 
+# Response: B
+#            Sum Sq  Df F value    Pr(>F)    
+# Treatment 0.10905   1 18.2485 3.682e-05 ***
+# New.Site  0.00050   2  0.0422    0.9586    
+# Depth     0.01708   2  1.4293    0.2432    
+# Residuals 0.78881 132                      
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+# Model diagnostics
+plot(b.model1) # looks ok, qq is a little off
+
+
+
+# Generalized Linear Model
+b.model2 <- glm(B ~ Treatment + New.Site + Depth, data = all.tbi.df, family= Gamma(link="inverse"))
+summary(b.model2)
+
+car::Anova(b.model2)
+# yes we get similar results
+
+anova(b.model2, test="Chisq")
+
+# Model Diagnostics
+plot(b.model2) # normality looks pretty bad
+
+
+# Linear Mixed Effects Model
+library(lme4)
+b.model3 <- lmer(B ~ Treatment + New.Site + Depth + (1 | Pair), data = all.tbi.df)
+summary(b.model3)
+car::Anova(b.model3, type=2)
+# Analysis of Deviance Table (Type II Wald chisquare tests)
+# 
+# Response: B
+#             Chisq Df Pr(>Chisq)    
+# Treatment 19.3895  1  1.066e-05 ***
+# New.Site   0.0904  2     0.9558    
+# Depth      2.7710  2     0.2502    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+library(MuMIn)
+r.squaredGLMM(b.model3)
+#       R2m       R2c
+# [1,] 0.1378685 0.1847664
+
+# Model Diagnostics
+plot(b.model3) # looks meh, maybe ok
+qqnorm(residuals(b.model3)) # looks ok
+
+
+
+
+# eemeans (post hoc analysis)
+library(emmeans)
+lsm.b <- emmeans(b.model3, "Treatment")
+lsm.b
+pairs(lsm.b)
+#  contrast        estimate     SE   df t.ratio p.value
+#  Caged - Uncaged   0.0569 0.0128 72.4 4.451   <.0001 
+# 
+# Results are averaged over the levels of: New.Site, Depth 
+# Degrees-of-freedom method: kenward-roger 
+
+
+
+### Plot of Lsmeans for B
+lsm.b.df <- as.data.frame(summary(lsm.b))
+colnames(lsm.b.df)
+
+p_B.lsmeans <- ggplot(lsm.b.df, aes(x=Treatment, y=emmean, colour= Treatment)) +
+    geom_pointrange(aes(ymin= emmean-SE, ymax= emmean+SE), size=2, shape=18) +
+  labs(y= "Abundance-per-species Losses", x="") +
+  ggtitle("***") +
+  theme_pubr(base_size = 16) + 
+  scale_colour_manual(values=c("#29AF7FFF", "#440154FF")) +
+  guides(color=FALSE)+
+  theme(axis.text.x=element_blank()) +
+  ggtitle("b) ***")
+p_B.lsmeans
+
+
+
+ggsave(file= "../figures/cover/B-lsmeans.png",
+       plot=p_B.lsmeans,
+       height=6,
+       width=8)
+```
+
+
+#### C
+```{r}
+########  Species Gain (C) ################
+##########################################
+range(all.tbi.df$C) # 0.01341064 0.43179658
+
+# Simple linear model
+c.model1 <- lm(C ~ Treatment + New.Site + Depth, data = all.tbi.df)
+summary(c.model1)
+plot(c.model1)
+car::Anova(c.model1, type=2)
+# Anova Table (Type II tests)
+# 
+# Response: C
+#            Sum Sq  Df F value    Pr(>F)    
+# Treatment 0.21653   1 30.2283 1.914e-07 ***
+# New.Site  0.00193   2  0.1349    0.8739    
+# Depth     0.01174   2  0.8198    0.4428    
+# Residuals 0.94552 132                      
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+plot(c.model1) # looks ok
+
+
+# Generalized Linear Model
+c.model2 <- glm(C ~ Treatment + New.Site + Depth, data = all.tbi.df, family= Gamma(link="inverse"))
+summary(c.model2)
+car::Anova(c.model2)
+anova(c.model2, test="Chisq")
+# yes we get similar results
+
+# Model Diagnostics
+plot(c.model2) # looks good
+
+
+
+# Linear Mixed Effects Model
+library(lme4)
+c.model3 <- lmer(C ~ Treatment + New.Site + Depth + (1 | Pair), data = all.tbi.df)
+summary(c.model3)
+car::Anova(c.model3, type=2)
+# Analysis of Deviance Table (Type II Wald chisquare tests)
+# 
+# Response: C
+#             Chisq Df Pr(>Chisq)    
+# Treatment 31.8935  1  1.629e-08 ***
+# New.Site   0.2593  2     0.8784    
+# Depth      1.6318  2     0.4422    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+# Model diagnostics
+plot(c.model3) # looks ok
+qqnorm(residuals(c.model3)) # looks good
+
+library(MuMIn)
+MuMIn::r.squaredGLMM(c.model3)
+#            R2m       R2c
+# [1,] 0.1911976 0.2430262
+# marginal= explained by fixed
+# conditional= explained by fixed and random
+
+# eemeans (post hoc analysis)
+library(emmeans)
+lsm.c <- emmeans(c.model3, "Treatment")
+lsm.c
+pairs(lsm.c)
+#  contrast        estimate     SE   df t.ratio p.value
+#  Caged - Uncaged   0.0794 0.0141 72.1 5.634   <.0001 
+# 
+# Results are averaged over the levels of: New.Site, Depth 
+# Degrees-of-freedom method: kenward-roger 
+
+
+
+### Plot of Lsmeans for C
+lsm.c.df <- as.data.frame(summary(lsm.c))
+colnames(lsm.c.df)
+
+p_C.lsmeans <- ggplot(lsm.c.df, aes(x=Treatment, y=emmean, colour= Treatment)) +
+    geom_pointrange(aes(ymin= emmean-SE, ymax= emmean+SE), size=2, shape=18) +
+  labs(y= "Abundance-per-species Gains") +
+  ggtitle("***") +
+  theme_pubr(base_size = 16) + 
+  scale_colour_manual(values=c("#29AF7FFF", "#440154FF")) +
+  guides(color=FALSE) +
+  ggtitle("c) ***")
+p_C.lsmeans
+
+
+
+ggsave(file= "../figures/cover/C-lsmeans.png",
+       plot=p_C.lsmeans,
+       height=6,
+       width=8)
+```
+
+
+```{r}
+# Plot TBI, C, and B together (FIGURE 4)
+
+p_tbi.c.b <- ggarrange(p_TBI.lsmeans, 
+          p_B.lsmeans,
+          p_C.lsmeans,
+          common.legend = TRUE,
+          nrow=3,ncol=1,
+          legend="none")
+
+p_tbi.c.b
+
+ggsave(file= "../figures/cover/tbi-b-c-lsm.png",
+       plot=p_tbi.c.b,
+       height=10,
+       width=5)
+```
+
+
+
+
+
+# Indicator Species
+ https://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.434.2321&rep=rep1&type=pdf 
+ https://cran.r-project.org/web/packages/indicspecies/vignettes/indicspeciesTutorial.pdf
+https://cran.r-project.org/web/packages/indicspecies/vignettes/indicspeciesTutorial.pdf 
+https://jkzorz.github.io/2019/07/02/Indicator-species-analysis.html
+
+
+```{r}
+library(indicspecies)
+
+######## 2014 #########
+
+# Check data
+rownames(cover.minor.diversity.2014_data)
+cover.minor.diversity.2014_wide$New.Tile.Number
+cover.minor.diversity.2014_wide$Treatment <- as.factor(cover.minor.diversity.2014_wide$Treatment)
+
+# Run the model
+inv = multipatt(cover.minor.diversity.2014_data, cover.minor.diversity.2014_wide$Treatment, func = "r.g", control = how(nperm=9999))
+summary(inv)
+
+#  Group Caged  #sps.  2 
+#       stat p.value    
+# LOB  0.522   1e-04 ***
+# DICT 0.241   1e-04 ***
+# 
+#  Group Uncaged  #sps.  2 
+#          stat p.value    
+# CCA.ALL 0.520   1e-04 ***
+# GEA     0.473   1e-04 ***
+
+
+
+
+
+######## 2016 ########
+# Check data
+rownames(cover.compare.diversity.2016_data)
+cover.compare.diversity.2016_wide$New.Tile.Number
+
+cover.compare.diversity.2016_wide$Treatment <- as.factor(cover.compare.diversity.2016_wide$Treatment)
+
+# Run the model 
+inv = multipatt(cover.compare.diversity.2016_data,cover.compare.diversity.2016_wide$Treatment, func = "r.g", control = how(nperm=9999))
+summary(inv)
+#  Group Caged  #sps.  5 
+#        stat p.value    
+# DICT  0.288  0.0001 ***
+# MACA5 0.214  0.0024 ** 
+# PEY   0.203  0.0143 *  
+# TURF  0.172  0.0438 *  
+# MACA1 0.145  0.0058 ** 
+# 
+#  Group Uncaged  #sps.  2 
+#          stat p.value    
+# CCA.ALL 0.359   1e-04 ***
+# GEA     0.319   3e-04 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1 
+# 
+
+
+######## Uncaged #########
+
+# Check data
+rownames(cover.ALL.uncaged_data)
+cover.ALL.uncaged_wide$New.Tile.Number.Year
+cover.ALL.uncaged_wide$Treatment <- as.factor(cover.ALL.uncaged_wide$Treatment)
+
+# Run the model
+inv = multipatt(cover.ALL.uncaged_data, cover.ALL.uncaged_wide$Year, func = "r.g", control = how(nperm=9999))
+summary(inv)
+#  Group 2014  #sps.  1 
+#          stat p.value    
+# CCA.ALL 0.443   1e-04 ***
+# 
+#  Group 2016  #sps.  4 
+#                         stat p.value    
+# Substrate              0.256   3e-04 ***
+# TURF                   0.212   8e-03 ** 
+# Coral                  0.159   6e-04 ***
+# Non.Coral.Invertebrate 0.151   5e-04 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+
+
+######## Caged #########
+
+# Check data
+rownames(cover.ALL.caged_data)
+cover.ALL.caged_wide$New.Tile.Number.Year
+cover.ALL.caged_wide$Treatment <- as.factor(cover.ALL.caged_wide$Treatment)
+
+# Run the model
+inv = multipatt(cover.ALL.caged_data, cover.ALL.caged_wide$Year, func = "r.g", control = how(nperm=9999))
+summary(inv)
+#  Group 2014  #sps.  1 
+#      stat p.value    
+# LOB 0.386   1e-04 ***
+# 
+#  Group 2016  #sps.  6 
+#        stat p.value    
+# TURF  0.345  0.0001 ***
+# GEA   0.335  0.0001 ***
+# MACA5 0.214  0.0013 ** 
+# Coral 0.194  0.0001 ***
+# MACA3 0.156  0.0123 *  
+# MACA1 0.145  0.0020 ** 
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1 
+```
+Indic species looks good! 
+
+
+
+# Permanova
+
+
+https://rpubs.com/collnell/manova
+https://stats.stackexchange.com/questions/314184/betadisper-is-significant-can-i-still-do-adonis-and-anosim
+https://stats.stackexchange.com/questions/476256/adonis-vs-adonis2
+
+https://ichthyology.usm.edu/courses/multivariate/feb_7.pdf 
+Note: strata is deprecated in adonis2, you should define similar structure (blocks) in permutations.  
+
+
+*Bray-Curtis*
+```{r}
+
+###### MARGINAL EFFECTS ######
+#########################
+# This is what we report.
+
+###### 2014 ######
+perm <- how(nperm=9999)
+setBlocks(perm) <- with(cover.minor.diversity.2014_wide, Pair)
+adonis2(cover.2014.bray ~ Treatment + New.Site + Depth, 
+       data = cover.minor.diversity.2014_wide, by= "margin", 
+       permutations=perm)
+# Marginal effects of terms
+# Blocks:  with(cover.minor.diversity.2014_wide, Pair) 
+# Permutation: free
+# Number of permutations: 9999
+# 
+# adonis2(formula = cover.2014.bray ~ Treatment + New.Site + Depth, data = cover.minor.diversity.2014_wide, permutations = perm, by = "margin")
+#            Df SumOfSqs      R2       F Pr(>F)    
+# Treatment   1   3.6168 0.23939 81.2594  1e-04 ***
+# New.Site    2   3.7606 0.24891 42.2457  1e-04 ***
+# Depth       2   0.0636 0.00421  0.7141  1e-04 ***
+# Residual  173   7.7000 0.50966                   
+# Total     178  15.1081 1.00000                   
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+
+
+
+####### 2016 #######
+perm <- how(nperm=9999)
+setBlocks(perm) <- with(cover.compare.diversity.2016_wide, Pair)
+adonis2(cover.2016.bray ~ Treatment + New.Site + Depth, 
+       data = cover.compare.diversity.2016_wide, by= "margin",
+       permutations=perm)
+# Marginal effects of terms
+# Blocks:  with(cover.compare.diversity.2016_wide, Pair) 
+# Permutation: free
+# Number of permutations: 9999
+# 
+# adonis2(formula = cover.2016.bray ~ Treatment + New.Site + Depth, data = cover.compare.diversity.2016_wide, permutations = perm, by = "margin")
+#            Df SumOfSqs      R2       F Pr(>F)    
+# Treatment   1   0.7298 0.05468 10.5410 0.0001 ***
+# New.Site    2   3.3030 0.24749 23.8544 0.0001 ***
+# Depth       2   0.1208 0.00905  0.8723 0.1705    
+# Residual  132   9.1386 0.68476                   
+# Total     137  13.3456 1.00000                   
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+```
+
+
+
+
+# Alpha Diversity
+## 2014
+```{r}
+# Calculate shannon diversity
+shannon.2014 <- diversity(cover.minor.diversity.2014_data)
+
+# Combine with metadata
+diversity.2014.metadata <- as.data.frame(cbind(shannon.2014,
+                                               cover.minor.diversity.2014_wide)) 
+# just take original tile number column
+
+# Raw data plots
+ggplot(diversity.2014.metadata, aes(x=Treatment, y=shannon.2014)) +
+  geom_boxplot()+
+  theme_pubr() + 
+  labs(y="Shannon Diversity") +
+  ggtitle("2014")
+
+
+# Check out the data 
+str(diversity.2014.metadata)
+diversity.2014.metadata$Treatment <- as.factor(diversity.2014.metadata$Treatment)
+diversity.2014.metadata$New.Site <- as.factor(diversity.2014.metadata$New.Site)
+diversity.2014.metadata$Depth <- as.factor(diversity.2014.metadata$Depth)
+diversity.2014.metadata$Pair <- as.factor(diversity.2014.metadata$Pair)
+
+range(diversity.2014.metadata$shannon.2014) # 0.1538376 1.4963310
+hist(diversity.2014.metadata$shannon.2014) # not bad, but not great
+
+
+##### Simple Linear Model #####
+shan.2014.model1 <- lm(shannon.2014 ~ Treatment + New.Site + Depth, data=diversity.2014.metadata)
+summary(shan.2014.model1)
+
+anova(shan.2014.model1)
+car::Anova(shan.2014.model1, type=2) 
+# Anova Table (Type II tests)
+# 
+# Response: shannon.2014
+#            Sum Sq  Df F value  Pr(>F)  
+# Treatment  0.3325   1  4.6774 0.03193 *
+# New.Site   0.5374   2  3.7795 0.02474 *
+# Depth      0.1834   2  1.2900 0.27789  
+# Residuals 12.2996 173                  
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+plot(shan.2014.model1) # looks ok
+
+# eemeans (post hoc analysis)
+library(emmeans)
+lsm.shannon.2014 <- emmeans(shan.2014.model1, "Treatment")
+lsm.shannon.2014
+pairs(lsm.shannon.2014)
+#  contrast        estimate     SE  df t.ratio p.value
+#  Caged - Uncaged  -0.0862 0.0399 173 -2.163  0.0319 
+# 
+# Results are averaged over the levels of: New.Site, Depth 
+
+
+
+
+####### Linear Mixed Effects Model ######
+library(lme4)
+shan.2014.model2 <- lmer(shannon.2014 ~ Treatment + New.Site + Depth + (1|Pair), data=diversity.2014.metadata) # singular
+shan.2014.model3 <- lmer(shannon.2014 ~ Treatment + New.Site+ (1|Pair), data=diversity.2014.metadata)# singular
+shan.2014.model4 <- lmer(shannon.2014 ~ Treatment + (1|Pair), data=diversity.2014.metadata)# singular
+
+
+
+### Plot of Lsmeans for Shannon
+lsm.shannon.2014.df <- as.data.frame(summary(lsm.shannon.2014))
+colnames(lsm.shannon.2014.df)
+
+p_shannon.2014.lsmeans <- ggplot(lsm.shannon.2014.df, aes(x=Treatment, y=emmean, colour= Treatment)) +
+    geom_pointrange(aes(ymin= emmean-SE, ymax= emmean+SE), size=2, shape=16) +
+  labs(y= "Shannon Diversity") +
+  theme_pubr(base_size = 16) + 
+  scale_colour_manual(values=c("#29AF7FFF", "#440154FF")) +
+  guides(color="none") +
+  ggtitle("a) Year 1*")
+p_shannon.2014.lsmeans
+
+```
+
+ 
+
+## 2016
+```{r}
+# Calculate Shannon Diversity
+shannon.2016 <- diversity(cover.compare.diversity.2016_data)
+
+# Combine with metadata
+diversity.2016.metadata <- as.data.frame(cbind(shannon.2016,
+                                               cover.compare.diversity.2016_wide)) 
+# just take original tile number column
+
+# Plot raw data
+ggplot(diversity.2016.metadata, aes(x=Treatment, y=shannon.2016)) +
+  geom_boxplot()+
+  theme_pubr() + 
+  labs(y="Shannon Diversity") +
+  ggtitle("2016")
+
+# Check out the data 
+str(diversity.2016.metadata)
+diversity.2016.metadata$Treatment <- as.factor(diversity.2016.metadata$Treatment)
+diversity.2016.metadata$New.Site <- as.factor(diversity.2016.metadata$New.Site)
+diversity.2016.metadata$Depth <- as.factor(diversity.2016.metadata$Depth)
+diversity.2016.metadata$Pair <- as.factor(diversity.2016.metadata$Pair)
+
+
+
+###### Simple Linear Regression #########
+shan.2016.model1 <- lm(shannon.2016 ~ Treatment + New.Site + Depth, data=diversity.2016.metadata)
+summary(shan.2016.model1)
+# Call:
+# lm(formula = shannon.2016 ~ Treatment + New.Site + Depth, data = diversity.2016.metadata)
+# 
+# Residuals:
+#      Min       1Q   Median       3Q      Max 
+# -0.91418 -0.15719  0.03518  0.20970  0.72402 
+# 
+# Coefficients:
+#                   Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)       1.121725   0.062436  17.966   <2e-16 ***
+# TreatmentUncaged  0.045095   0.054831   0.822    0.412    
+# New.SiteFR7      -0.080438   0.069288  -1.161    0.248    
+# New.SiteFR9      -0.013843   0.063818  -0.217    0.829    
+# DepthMiddle      -0.006037   0.066642  -0.091    0.928    
+# DepthShallow      0.019686   0.066775   0.295    0.769    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 0.321 on 132 degrees of freedom
+# Multiple R-squared:  0.01638,	Adjusted R-squared:  -0.02088 
+# F-statistic: 0.4397 on 5 and 132 DF,  p-value: 0.8201
+anova(shan.2016.model1)
+car::Anova(shan.2016.model1)
+# not significant
+
+plot(shan.2016.model1) # looks ok
+
+
+######## Linear Mixed Effects Model #######
+shan.2016.model2 <- lmer(shannon.2016 ~ Treatment + New.Site + Depth + (1|Pair), data=diversity.2016.metadata)
+summary(shan.2016.model2)
+car::Anova(shan.2016.model2)
+# not significant
+# Analysis of Deviance Table (Type II Wald chisquare tests)
+# 
+# Response: shannon.2016
+#            Chisq Df Pr(>Chisq)
+# Treatment 0.8505  1     0.3564
+# New.Site  1.3012  2     0.5217
+# Depth     0.1574  2     0.9243
+
+
+
+
+# eemeans (post hoc analysis)
+library(emmeans)
+lsm.shannon.2016 <- emmeans(shan.2016.model1, "Treatment")
+lsm.shannon.2016
+pairs(lsm.shannon.2016)
+#  contrast        estimate     SE  df t.ratio p.value
+#  Caged - Uncaged  -0.0451 0.0548 132 -0.822  0.4123 
+# 
+# Results are averaged over the levels of: New.Site, Depth 
+
+
+
+### Plot of Lsmeans for Shannon
+lsm.shannon.2016.df <- as.data.frame(summary(lsm.shannon.2016))
+colnames(lsm.shannon.2016.df)
+
+p_shannon.2016.lsmeans <- ggplot(lsm.shannon.2016.df, aes(x=Treatment, y=emmean, colour= Treatment)) +
+    geom_pointrange(aes(ymin= emmean-SE, ymax= emmean+SE), size=2, shape=17) +
+  labs(y= "") +
+  theme_pubr(base_size = 16) + 
+  scale_colour_manual(values=c("#29AF7FFF", "#440154FF")) +
+  guides(color="none") +
+  ggtitle("b) Year 3, ns")
+p_shannon.2016.lsmeans
+```
+
+
+
+
+```{r}
+# Plot Shannon Diversity Together (FIGURE 5)
+p_lsmeans_shannon <- ggarrange(p_shannon.2014.lsmeans, 
+          p_shannon.2016.lsmeans,
+          common.legend = TRUE,
+          nrow=1,ncol=2,
+          legend="none")
+
+p_lsmeans_shannon
+
+ggsave(file= "../figures/cover/shannon-lsmeans.png",
+       plot=p_lsmeans_shannon,
+       height=5,
+       width=10)
+```
+
+
