@@ -1,7 +1,7 @@
 # Dependencies for beta deviation code
 
 
-
+# code from Vannette, R. L., and T. Fukami. 2017. Dispersal enhances beta diversity in nectar microbes. Ecology letters 20:901–910.
 
 
 #### vanette & fukami.r #####
