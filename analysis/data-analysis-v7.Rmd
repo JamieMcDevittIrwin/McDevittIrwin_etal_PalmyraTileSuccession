@@ -2099,6 +2099,21 @@ Note: strata is deprecated in adonis2, you should define similar structure (bloc
 # This is what we report.
 
 ###### 2014 ######
+# checking data and metadata have the same order
+rownames(cover.minor.diversity.2014_data)
+cover.minor.diversity.2014_wide$New.Tile.Number
+
+# change to factors
+str(cover.minor.diversity.2014_wide)
+cover.minor.diversity.2014_wide$Treatment <- as.factor(cover.minor.diversity.2014_wide$Treatment)
+cover.minor.diversity.2014_wide$New.Site <- as.factor(cover.minor.diversity.2014_wide$New.Site)
+cover.minor.diversity.2014_wide$Depth <- as.factor(cover.minor.diversity.2014_wide$Depth)
+cover.minor.diversity.2014_wide$Pair <- as.factor(cover.minor.diversity.2014_wide$Pair)
+str(cover.minor.diversity.2014_wide) # looks good
+
+# calculate bray curtis
+cover.2014.bray <-vegdist(sqrt(cover.minor.diversity.2014_data), method='bray')
+
 perm <- how(nperm=9999)
 setBlocks(perm) <- with(cover.minor.diversity.2014_wide, Pair)
 adonis2(cover.2014.bray ~ Treatment + New.Site + Depth, 
@@ -2123,6 +2138,21 @@ adonis2(cover.2014.bray ~ Treatment + New.Site + Depth,
 
 
 ####### 2016 #######
+# checking data and metadata have the same order
+rownames(cover.compare.diversity.2016_data)
+cover.compare.diversity.2016_wide$New.Tile.Number
+
+# change to factors
+str(cover.compare.diversity.2016_wide)
+cover.compare.diversity.2016_wide$Treatment <- as.factor(cover.compare.diversity.2016_wide$Treatment)
+cover.compare.diversity.2016_wide$New.Site <- as.factor(cover.compare.diversity.2016_wide$New.Site)
+cover.compare.diversity.2016_wide$Depth <- as.factor(cover.compare.diversity.2016_wide$Depth)
+cover.compare.diversity.2016_wide$Pair <- as.factor(cover.compare.diversity.2016_wide$Pair)
+str(cover.compare.diversity.2016_wide) # looks good
+
+# calculate bray curtis
+cover.2016.bray <-vegdist(sqrt(cover.compare.diversity.2016_data), method='bray')
+
 perm <- how(nperm=9999)
 setBlocks(perm) <- with(cover.compare.diversity.2016_wide, Pair)
 adonis2(cover.2016.bray ~ Treatment + New.Site + Depth, 
